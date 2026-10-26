@@ -1,0 +1,28 @@
+appId: com.beachday.app
+productName: Beachday
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - src/main/**/*
+  - dist/renderer/**/*
+  - package.json
+
+# Windows ships as a ZIP rather than an installer, on purpose.
+# See PLAN.md §7 "Distribution without a code-signing certificate":
+# recipients right-click the zip -> Properties -> Unblock -> extract,
+# which strips Mark-of-the-Web and avoids SmartScreen entirely.
+win:
+  target:
+    - target: zip
+      arch: [x64]
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+  category: AudioVideo
+  syncDesktopName: true
+  synopsis: Audio player and playlist curation tool for local music files

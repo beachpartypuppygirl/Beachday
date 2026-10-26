@@ -1,0 +1,29 @@
+Beachday -- audio playing software that plays and manages local files
+
+features:
+- standard "baseline" audio player features: covers the popular audio file formats, including .mp3, .flac, and .wav at least; can play songs in sequence or shuffling
+- playlist creating tool that allows you to import files into the playlist and then:
+	- the playlist is an individual file that can be shared via file-sending services and loaded into Beachday on a different computer while keeping all of the customization intact
+		- this would mean, ideally, the playlist can be saved two ways: either 1) by saving it with each song pointing to the location where the song is stored on the local computer, so that it isnt required to have the tracks duplicated for each playlist, or 2) by saving each track into the playlist file/folder, so it can be easily shared and managed
+	- order the files/tracks from top to bottom within the playlist
+	- provide metadata for each song that is only used within the context of that playlist, such as renaming the song or associating a unique image with that song. this would be saved "playlist-side", not on the track's metadata itself
+	- name the playlist, provide a playlist description, and provide playlist cover art, as well as an playlist "author" field
+	- provide an option for linking songs together within the playlist-- for instance, at a playlist level, when a song comes on shuffle, it can be "linked" so that a specific song always comes after it, and further tracks can be "linked" in a row in this way.
+	- volume level (decibel adjustment) for each song individually
+- functionality to pull lyrics from lyric websites (if toggled on)
+- a significant area for the image associated with each track to be displayed, in high quality. ideally this could be adjustable, but i want 1/2-2/3 of the screen to be taken up by the image associated with a given track. see "example (foobar2k skin).png" for an example of what i mean-- i really like that skin's layout. ideally this section could display both images and gifs
+- optional subgroups in the playlist. by default the subgroups would be off, and the playlist can be set so the files are subgrouped by artist, or by album. additionally, custom subgroups can be created. subgroups ideally have main names and sub-names, which would correlate to the album and artist by defualt (so that it may show "American Idiot" in large text, then "Green Day" in small text by default when subgroups are set to sort by album). additionally, each subgroup can be set with a description and cover art, which would be showed in a small image next to the subgroup's name on the music list. 
+	- for reference for this complicated idea, "example (foobar2k skin).png" shows it fairly well-- this shows a list of video game music files loaded, sorted by game, with the game series in one sub-name and even the console in another sub-name (Pokemon Legends: Arceus is shown, with Pokemon below it and Nintendo Switch below it still) alongside a small image on the side of each subgroup.
+	- i'd love if the subgroup information also showed the number of tracks and the total time of the files alongside the sub-names
+	- if you have suggestions on how to do subgroups that i may have missed, please let me know!
+- at the top of the playlist, also show the total number of tracks and total time of the files
+- bottom bar that shows:
+	- time passed/left in song, as a traveling bar
+	- pause/play button, stop button, previous/next buttons, playback order button (direct/shuffle)
+	- volume up and down slider
+- i'd love if each playlist could have a group of colors set to it-- maybe a "primary", "secondary", and "tertiary" color that affects things on the application's looks? this would have to be considered throughout designing the app but i like that idea, i'd be open to suggestions on how best to do that or categorize the custom colors
+- i'd like the application to ideally work with both linux and windows. the application is being developed on linux, but will be used primarily on windows! :)
+
+concepts i probably dont want to integrate, but they're ideas:
+	- equalizer to adjust the bass and treble
+	- shuffle remaining songs, rather than all songs over again feature

@@ -1,0 +1,59 @@
+/*
+ * Beachday design tokens.
+ *
+ * PLAN.md §5 "Theming — derive, don't slot": a playlist supplies three raw
+ * colors (primary / secondary / tertiary). Those are NEVER bound directly to
+ * UI surfaces — three arbitrary colors will produce unreadable pairings.
+ * Instead they feed the derived token set below, which is what components use.
+ *
+ * Phase 9 adds the derivation step (and the WCAG contrast check that adjusts
+ * lightness when a pairing fails). Until then these are hand-authored defaults
+ * standing in for generated output, so every component built in Phases 1-8 is
+ * already reading from the right layer and needs no retrofit.
+ */
+
+:root {
+  /* --- Raw playlist palette (Phase 9 overwrites these per playlist) --- */
+  --palette-primary: #e8766b;
+  --palette-secondary: #2b2320;
+  --palette-tertiary: #f0c040;
+
+  /* --- Derived surfaces --- */
+  --bg: #14110f;
+  --surface: #1c1816;
+  --surface-raised: #272120;
+  --surface-hover: #332b28;
+
+  /* --- Derived text --- */
+  --text-primary: #f2ece8;
+  --text-secondary: #b8aba4;
+  --text-muted: #7d716b;
+
+  /* --- Derived accents --- */
+  --accent: var(--palette-primary);
+  --accent-hover: #f08c82;
+  --accent-contrast: #14110f;
+  --highlight: var(--palette-tertiary);
+
+  /* --- Lines --- */
+  --border: #332b28;
+  --border-strong: #463b37;
+
+  /* --- Chrome --- */
+  --titlebar-height: 34px;
+  --transport-height: 84px;
+
+  /* --- Type --- */
+  --font-ui: "Inter", "Segoe UI", "Noto Sans", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Mono", "DejaVu Sans Mono", monospace;
+
+  /* --- Motion --- */
+  --ease: cubic-bezier(0.2, 0, 0.1, 1);
+  --fast: 120ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --fast: 0ms;
+  }
+}
