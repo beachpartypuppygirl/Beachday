@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { registerMediaScheme, handleMediaProtocol, grantMediaUrl } from './media.mjs';
 
 // ESM has no __dirname; derive it from import.meta.url.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -109,8 +110,9 @@ ipcMain.handle('app:get-info', () => ({
   packaged: app.isPackaged,
 }));
 
-// Phase 3 will build real import on top of this; for Phase 1 it exists to
-// prove the renderer -> main -> native dialog -> renderer round trip works.
+// Phase 3 replaces this with real import (tags, embedded art). For now each
+// chosen file comes back with a playable beachday-media:// URL and its file
+// name standing in for a title.
 ipcMain.handle('dialog:open-audio-files', async (event) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   const result = await dialog.showOpenDialog(win, {
@@ -121,12 +123,19 @@ ipcMain.handle('dialog:open-audio-files', async (event) => {
       { name: 'All Files', extensions: ['*'] },
     ],
   });
-  return result.canceled ? [] : result.filePaths;
+  if (result.canceled) return [];
+  return result.filePaths.map((filePath) => ({
+    path: filePath,
+    title: path.parse(filePath).name,
+    url: grantMediaUrl(filePath),
+  }));
 });
 
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
+
+registerMediaScheme();
 
 // Only one Beachday at a time; a second launch focuses the existing window.
 if (!app.requestSingleInstanceLock()) {
@@ -139,7 +148,10 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
 
-  app.whenReady().then(createWindow);
+  app.whenReady().then(() => {
+    handleMediaProtocol();
+    createWindow();
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

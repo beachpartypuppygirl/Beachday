@@ -5,3 +5,12 @@ release/
 npm-debug.log*
 .DS_Store
 .vite/
+
+# Local test audio — never commit music
+*.mp3
+*.flac
+*.wav
+*.ogg
+*.opus
+*.m4a
+*.aac

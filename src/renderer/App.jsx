@@ -1,27 +1,17 @@
-import { useEffect, useState } from 'react';
 import TitleBar from './components/TitleBar.jsx';
+import Transport from './components/Transport.jsx';
+import { player } from './audio/engine.js';
+import { usePlayer } from './audio/usePlayer.js';
 
 /**
- * Phase 1 shell. The layout mirrors PLAN.md §1: a large art pane on the left
+ * App shell. The layout mirrors PLAN.md §1: a large art pane on the left
  * (1/2-2/3 of the window) and the track list on the right, with the transport
- * bar across the bottom. Everything inside those regions is a placeholder.
+ * bar across the bottom.
  *
- * The right pane currently holds a smoke test that exercises the full IPC
- * path in both directions — renderer -> main -> native dialog -> renderer.
- * Phase 3 replaces it with the real track list.
+ * The right pane currently holds a Phase 2 test queue: pick files, then
+ * double-click one to play it. Phase 3 replaces it with the real track list.
  */
 export default function App() {
-  const [info, setInfo] = useState(null);
-  const [pickedFiles, setPickedFiles] = useState([]);
-
-  useEffect(() => {
-    window.beachday.app.getInfo().then(setInfo);
-  }, []);
-
-  async function handlePickFiles() {
-    setPickedFiles(await window.beachday.dialog.openAudioFiles());
-  }
-
   return (
     <div className="app">
       <TitleBar />
@@ -39,54 +29,50 @@ export default function App() {
         </section>
 
         <section className="pane pane--list">
-          <div className="smoke">
-            <h2 className="smoke__heading">Phase 1 — Shell &amp; IPC</h2>
-            <p className="smoke__note">
-              Verifies the renderer can reach the main process and back. Replaced by the
-              real track list in Phase 3.
-            </p>
-
-            {info ? (
-              <dl className="smoke__grid">
-                <dt>app</dt>
-                <dd>
-                  {info.name} {info.version}
-                </dd>
-                <dt>electron</dt>
-                <dd>{info.electron}</dd>
-                <dt>chrome</dt>
-                <dd>{info.chrome}</dd>
-                <dt>node</dt>
-                <dd>{info.node}</dd>
-                <dt>platform</dt>
-                <dd>
-                  {info.platform}/{info.arch}
-                </dd>
-                <dt>mode</dt>
-                <dd>{info.packaged ? 'packaged' : 'development'}</dd>
-              </dl>
-            ) : (
-              <p className="smoke__note">Waiting on main process…</p>
-            )}
-
-            <button className="button" type="button" onClick={handlePickFiles}>
-              Test native file dialog
-            </button>
-
-            {pickedFiles.length > 0 && (
-              <ul className="smoke__results">
-                {pickedFiles.map((filePath) => (
-                  <li key={filePath}>{filePath}</li>
-                ))}
-              </ul>
-            )}
-          </div>
+          <TestQueue />
         </section>
       </main>
 
-      <footer className="transport">
-        Transport bar — progress, play/pause/stop, previous/next, shuffle, volume · Phase 2
-      </footer>
+      <Transport />
+    </div>
+  );
+}
+
+function TestQueue() {
+  const { queue, index, status } = usePlayer();
+
+  async function handleAddFiles() {
+    const tracks = await window.beachday.dialog.openAudioFiles();
+    player.addTracks(tracks.map((track) => ({ ...track, id: crypto.randomUUID() })));
+  }
+
+  return (
+    <div className="testqueue">
+      <div className="testqueue__header">
+        <div>
+          <h2 className="testqueue__heading">Phase 2 — Test Queue</h2>
+          <p className="testqueue__note">
+            Double-click a track to play it. Replaced by the real track list in Phase 3.
+          </p>
+        </div>
+        <button className="button" type="button" onClick={handleAddFiles}>
+          Add files…
+        </button>
+      </div>
+
+      <ol className="testqueue__list">
+        {queue.map((track, i) => (
+          <li
+            key={track.id}
+            className={`testqueue__track${i === index && status !== 'empty' ? ' testqueue__track--current' : ''}`}
+            title={track.path}
+            onDoubleClick={() => player.playIndex(i)}
+          >
+            <span className="testqueue__number">{i + 1}</span>
+            <span className="testqueue__title">{track.title}</span>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }

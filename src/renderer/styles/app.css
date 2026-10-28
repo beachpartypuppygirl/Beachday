@@ -179,14 +179,22 @@ button {
 }
 
 /* --------------------------------------------------------------------------
-   Phase 1 smoke test panel (removed in Phase 3)
+   Phase 2 test queue (replaced by the track list in Phase 3)
    -------------------------------------------------------------------------- */
 
-.smoke {
+.testqueue {
   padding: 18px 20px;
 }
 
-.smoke__heading {
+.testqueue__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.testqueue__heading {
   margin: 0 0 4px;
   font-size: 13px;
   font-weight: 600;
@@ -195,32 +203,14 @@ button {
   color: var(--text-muted);
 }
 
-.smoke__note {
-  margin: 0 0 16px;
+.testqueue__note {
+  margin: 0;
   font-size: 12.5px;
   color: var(--text-muted);
 }
 
-.smoke__grid {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 5px 14px;
-  margin: 0 0 18px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-
-.smoke__grid dt {
-  color: var(--text-muted);
-}
-
-.smoke__grid dd {
-  margin: 0;
-  color: var(--text-secondary);
-  user-select: text;
-}
-
 .button {
+  flex-shrink: 0;
   padding: 7px 14px;
   border-radius: 6px;
   background: var(--accent);
@@ -234,20 +224,43 @@ button {
   background: var(--accent-hover);
 }
 
-.smoke__results {
-  margin: 16px 0 0;
+.testqueue__list {
+  margin: 0;
   padding: 0;
   list-style: none;
-  font-family: var(--font-mono);
-  font-size: 11.5px;
+}
+
+.testqueue__track {
+  display: flex;
+  gap: 12px;
+  padding: 3px 8px;
+  border-left: 3px solid transparent;
+  font-size: 13px;
   color: var(--text-secondary);
 }
 
-.smoke__results li {
-  padding: 4px 0;
-  border-bottom: 1px solid var(--border);
-  overflow-wrap: anywhere;
-  user-select: text;
+.testqueue__track:hover {
+  background: var(--surface-hover);
+}
+
+.testqueue__track--current {
+  border-left-color: var(--highlight);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+}
+
+.testqueue__number {
+  min-width: 2ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.testqueue__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* --------------------------------------------------------------------------
@@ -256,11 +269,194 @@ button {
 
 .transport {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
   padding: 0 20px;
-  gap: 18px;
   background: var(--surface);
   border-top: 1px solid var(--border);
+}
+
+.transport__row {
+  display: grid;
+  /* Equal outer columns keep the buttons centred on the window, not the gap. */
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+}
+
+.transport__now {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
+
+.transport__title {
+  color: var(--text-primary);
+}
+
+.transport__idle {
   color: var(--text-muted);
-  font-size: 12.5px;
+}
+
+.transport__error {
+  color: var(--accent);
+}
+
+.transport__controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.transport__button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1.5px solid var(--highlight);
+  border-radius: 50%;
+  color: var(--highlight);
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+.transport__button svg {
+  width: 11px;
+  height: 11px;
+}
+
+.transport__button--large {
+  width: 34px;
+  height: 34px;
+}
+
+.transport__button--large svg {
+  width: 13px;
+  height: 13px;
+}
+
+.transport__button:hover {
+  background: var(--highlight);
+  color: var(--accent-contrast);
+}
+
+.transport__right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 18px;
+}
+
+.transport__clock {
+  display: flex;
+  gap: 8px;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.transport__clock-total {
+  color: var(--text-secondary);
+}
+
+.transport__clock--idle {
+  color: var(--text-muted);
+}
+
+/* --- Volume --- */
+
+.volume {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.volume__mute {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  color: var(--text-secondary);
+}
+
+.volume__mute:hover {
+  color: var(--text-primary);
+}
+
+.volume__mute svg {
+  width: 15px;
+  height: 15px;
+}
+
+.volume__slider {
+  width: 96px;
+  height: 14px;
+  margin: 0;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.volume__slider::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    var(--text-secondary) var(--fill),
+    var(--border-strong) var(--fill)
+  );
+}
+
+.volume__slider::-webkit-slider-thumb {
+  width: 10px;
+  height: 10px;
+  margin-top: -3.5px;
+  border-radius: 50%;
+  background: var(--text-primary);
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* --- Seek bar --- */
+
+.seekbar {
+  /* Tall hit area around a thin visible track. */
+  padding: 5px 0;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.seekbar--disabled {
+  cursor: default;
+}
+
+.seekbar__track {
+  position: relative;
+  height: 4px;
+  background: var(--surface-raised);
+}
+
+.seekbar__fill {
+  height: 100%;
+  background: color-mix(in srgb, var(--highlight) 35%, transparent);
+}
+
+.seekbar__handle {
+  position: absolute;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  background: var(--highlight);
+  transform: translate(-50%, -50%);
+}
+
+.seekbar--disabled .seekbar__handle {
+  display: none;
+}
+
+.seekbar:hover .seekbar__track,
+.seekbar--dragging .seekbar__track {
+  background: var(--surface-hover);
 }

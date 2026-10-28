@@ -2,8 +2,8 @@
 
 Audio player and playlist curation tool for local music files. Linux + Windows.
 
-**Status:** Planning. No code written yet.
-**Last updated:** 2026-10-26
+**Status:** Phases 1–2 complete; Phase 3 next.
+**Last updated:** 2026-10-28
 
 ---
 
@@ -316,7 +316,49 @@ files from quietly reaching 400MB.
 
 Also pause animation when the window loses focus.
 
+**Display modes** (View ▸ Art Pane; app-level preference): **Art Only** (default),
+**Lyrics Only** (on a palette-derived background), **Lyrics Over Art** (white text, dark outline
+plus soft shadow, optional dimming layer for busy art). Synced `.lrc` highlights the current line
+and auto-scrolls; unsynced lyrics fall back to a static scrollable block. With no lyrics found,
+Lyrics Over Art shows art alone and Lyrics Only shows "No lyrics found". Phase 10.
+
+### Playlist tabs
+
+Several playlists can be open at once as tabs. A tab is a **shortcut to a `.bday` file**, not a
+loaded document. Decided 2026-10-28.
+
+- **Placement:** a tab strip across the top of the **list pane**, above the playlist header
+  (total tracks / total time). Not in the title bar: the title bar is the window's drag region
+  and is already full with the menus. The art pane keeps its full height.
+- **Session restore:** the open tab list (paths + display names, order, active tab) is app-level
+  config in `userData`, **not** stored in any `.bday`. Restored on launch as *unloaded* tabs.
+- **Lazy loading:** a tab loads its playlist when clicked. A slow first load is acceptable. An
+  inactive tab may be unloaded again, except the one that is playing.
+- **Missing files:** a tab whose `.bday` has moved shows as missing. Clicking it offers to locate
+  the file or remove the tab.
+- **Playing vs viewed:** playback belongs to one playlist and **keeps playing when you switch
+  tabs**. The playing tab shows a ♪ marker, and View ▸ Jump to Now Playing switches back to it.
+- **Theming follows the viewed tab.** The art pane keeps showing now-playing art regardless.
+- **Unsaved changes:** closing a dirty tab, or quitting with one open, prompts "Save changes?".
+  Never-saved "Untitled" playlists are not restored as tabs.
+- **Undo history is per tab.** Cut/Copy/Paste is how tracks move between playlists.
+
+**The cost lands in Phase 4, not 5.** The playlist store holds *many* playlists from the start
+(`openPlaylists`, `viewedId`, `playingId`), even while the UI shows one. That's barely more work
+up front. Converting a single-playlist store later would touch every call site. The tab strip
+itself is a small UI job in Phase 5.
+
+### Undo / redo
+
+Every playlist mutation (reorder, add, remove, link/unlink, rename, art, gain, grouping,
+properties) goes through **one undoable path**: a command applied to the store, with a per-playlist
+history stack. Playback state is never in history. Like the multi-playlist store, this shape has
+to exist from Phase 4, because retrofitting it means touching every edit site. Shortcuts and menu
+placement are in `MENUS.md`.
+
 ---
+
+**Menu bar:** where each feature is reached from lives in `MENUS.md`.
 
 ## 6. Phases
 
@@ -326,15 +368,15 @@ should land while the codebase is small.
 | # | Phase | Done when | Risk |
 |---|---|---|---|
 | 1 | **Foundations** — **DONE** | Electron shell runs on Linux; main↔renderer IPC working; `electron-builder` produces a Windows zip; custom window chrome | — |
-| 2 | **Audio engine** | mp3/flac/wav play; seek, volume, play/pause/stop/next/prev; sequential order; transport bar; **dual-element preload** (§5) | Low |
+| 2 | **Audio engine** — **DONE** | mp3/flac/wav play; seek, volume, play/pause/stop/next/prev; sequential order; transport bar; **dual-element preload** (§5) | Low |
 | 3 | **Metadata + import** | Folder/file import reads tags and embedded art; art cached to disk; tracks render in a flat list | Low–Med |
-| 4 | **Playlist format** | `.bday` saves and loads in both modes; **relink flow works across a simulated Linux→Windows path change** | **High** |
-| 5 | **Track list** | Virtualized flat list → group headers → collapse → drag-reorder → multi-select, smooth at 5,000 tracks | **High** |
+| 4 | **Playlist format** | `.bday` saves and loads in both modes; **relink flow works across a simulated Linux→Windows path change**; multi-playlist store with per-playlist undo history (§5) | **High** |
+| 5 | **Track list** | Virtualized flat list → group headers → collapse → drag-reorder → multi-select, smooth at 5,000 tracks; playlist tab strip with session restore (§5) | **High** |
 | 6 | **Art pane** | Large art with resizable split; GIF support with import guardrail; art resolution chain | Med |
 | 7 | **Playlist-side metadata** | Per-track rename / custom art / dB; playlist name, description, author, cover; subgroup editor | Med |
 | 8 | **Shuffle + links** | Permutation-cursor shuffle; shuffle-remaining; contiguous chains with multi-select Link/Unlink; mid-chain click behaviour; repeat modes | Med |
 | 9 | **Theming** | Per-playlist palette picker; derived tokens; contrast validation | Med |
-| 10 | **Lyrics + packaging** | LRCLIB fetch with toggle; Windows zip + Linux AppImage; install docs for friends | Med |
+| 10 | **Lyrics + packaging** | LRCLIB fetch with toggle; art-pane lyrics modes; Windows zip + Linux AppImage; install docs for friends | Med |
 
 ---
 
@@ -427,3 +469,46 @@ electron-builder 26.18.0. `npm audit` clean.
    working transport bar
 2. Replace the Phase 1 smoke panel in `App.jsx` with real UI as Phase 3 lands
 3. Replace the `build/icon.png` placeholder with real artwork whenever you feel like it
+
+---
+
+## 10. Phase 2 — Complete (2026-10-28)
+
+Verified with a harness that runs the real protocol, preload and renderer against WAV (48kHz),
+FLAC (48kHz/16) and MP3 (44.1kHz/128k, ID3v2.3), plus a deliberately corrupt file, in both dev
+and built-bundle modes. Signal was confirmed with an analyser on the output bus, not just
+element state.
+
+- **Inter-track gap:** with the next track preloaded, the next deck's `playing` fires **~1ms**
+  after `ended` (FLAC → MP3). Comfortably inside the ~20–100ms target.
+- Seeking works in all three formats (Range requests → 206).
+- Play/pause/stop/next/previous, mute, volume; Previous restarts after 3s; queue end stops.
+- Unplayable tracks are skipped with a message in the transport bar.
+
+### How it's built
+
+- **`beachday-media://track/<token>`** (`src/main/media.mjs`). Main grants an opaque URL per
+  user-chosen file and serves only those, with Range support. Tokens avoid encoding Windows
+  paths into URLs and mean the renderer can't request arbitrary files. Phase 4's playlist
+  loader grants URLs for each resolved track the same way.
+- **Engine** (`src/renderer/audio/engine.js`): two decks, each `<audio>` → source → own
+  `trackGain`, into `masterGain` → limiter → trim. The next track preloads in the final 10s.
+  `nextIndex()` is the single seam Phase 8's shuffle cursor replaces.
+- **Media keys** go through `navigator.mediaSession` in the renderer, which also feeds the
+  Windows media overlay and Linux MPRIS. No main-process `globalShortcut` needed.
+- Volume persists in `localStorage` (per-viewer convenience; app config moves to `userData`
+  with session tabs in Phase 5).
+
+### Findings worth keeping
+
+- **Limiter makeup gain.** Chromium's `DynamicsCompressorNode` follows the spec's automatic
+  makeup gain: at threshold −1dB / ratio 20 it lifts everything ~0.57dB (−6dB in → −5.43dB out)
+  and can push near-peak audio past 0dBFS. A trim gain of −makeup restores exact unity below
+  threshold. Measured: **+12dB of boost peaks at −0.09dBFS**, so **Phase 7 caps per-track gain
+  at +12dB**.
+- **Stale failure reports.** A broken file reports through both the `error` event and the
+  `play()` rejection, and the second can arrive after the deck has moved to the next track.
+  Each deck load bumps a `loadId`; async results compare against it.
+- **MP3 encoder padding** (§5) is still present — the MP3 seam is real but small. Unchanged
+  decision: FLAC for transitions that must be seamless.
+
