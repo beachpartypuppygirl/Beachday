@@ -15,6 +15,10 @@ const RECENT_LIMIT = 10;
 const DEFAULTS = {
   folderMappings: [],
   recentFiles: [],
+  /** Options ▸ Restore Tabs on Startup */
+  restoreTabs: true,
+  /** Open tabs at last save: { tabs: [{ filePath, name }], active: index } (PLAN.md §5) */
+  session: { tabs: [], active: 0 },
 };
 
 let configPath = null;

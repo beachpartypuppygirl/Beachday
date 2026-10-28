@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain } from 'electron';
+import { BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import fs from 'node:fs';
 import { mkdir, stat } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
@@ -306,6 +306,43 @@ export function registerPlaylistIpc() {
   });
 
   ipcMain.handle('playlist:recent', () => getConfig().recentFiles);
+
+  // --- Session tabs (PLAN.md §5) ---
+
+  ipcMain.handle('session:get', () => {
+    const { restoreTabs, session } = getConfig();
+    return { restoreTabs, tabs: restoreTabs ? session.tabs : [], active: session.active };
+  });
+
+  /** The renderer reports open saved tabs whenever they change. */
+  ipcMain.handle('session:save', (_event, session) => {
+    if (!Array.isArray(session?.tabs)) return;
+    const tabs = session.tabs
+      .filter((tab) => typeof tab?.filePath === 'string' && tab.filePath.toLowerCase().endsWith('.bday'))
+      .map((tab) => ({ filePath: tab.filePath, name: String(tab.name ?? '') }));
+    const active = Number.isInteger(session.active) ? session.active : 0;
+    return updateConfig({ session: { tabs, active } });
+  });
+
+  ipcMain.handle('config:set-restore-tabs', (_event, restoreTabs) => updateConfig({ restoreTabs: Boolean(restoreTabs) }));
+
+  /**
+   * Load a restored tab. Allowed only for paths in the saved session or
+   * recent files. Resolves { missing: true } when the file has gone, without
+   * an error dialog: the tab itself shows that.
+   */
+  ipcMain.handle('playlist:open-session', async (event, filePath) => {
+    const { session, recentFiles } = getConfig();
+    if (!session.tabs.some((tab) => tab.filePath === filePath) && !recentFiles.includes(filePath)) return null;
+    if (!fs.existsSync(filePath)) return { missing: true };
+    return openOrReport(event, filePath);
+  });
+
+  /** Track ▸ Show in File Manager. Bundled audio shows its .bday. */
+  ipcMain.handle('track:show-in-folder', (_event, url) => {
+    const source = sourceForUrl(url);
+    if (source) shell.showItemInFolder(source.path);
+  });
 
   /**
    * request: { filePath, saveAs, copy, storage, doc, urls, name }

@@ -83,7 +83,7 @@ export default function MenuBar() {
   );
 }
 
-function MenuList({ items, ctx, onRun, autoFocus = false, nested = false }) {
+export function MenuList({ items, ctx, onRun, autoFocus = false, nested = false }) {
   const listRef = useRef(null);
   const [submenuId, setSubmenuId] = useState(null);
   const resolved = items.map((item) => resolveItem(item, ctx));

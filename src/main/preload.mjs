@@ -44,6 +44,14 @@ contextBridge.exposeInMainWorld('beachday', {
     onSaveProgress: (callback) => subscribe('playlist:save-progress', callback),
     resolve: (request) => ipcRenderer.invoke('playlist:resolve', request),
     locate: (request) => ipcRenderer.invoke('playlist:locate', request),
+    openSession: (filePath) => ipcRenderer.invoke('playlist:open-session', filePath),
+    showInFolder: (url) => ipcRenderer.invoke('track:show-in-folder', url),
+  },
+
+  session: {
+    get: () => ipcRenderer.invoke('session:get'),
+    save: (session) => ipcRenderer.invoke('session:save', session),
+    setRestoreTabs: (restore) => ipcRenderer.invoke('config:set-restore-tabs', restore),
   },
 
   config: {

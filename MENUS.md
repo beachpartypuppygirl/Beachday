@@ -46,7 +46,8 @@ Changes from the Phase 1 placeholder (`File Edit View Playback Playlists Options
 | Add Files… | | 3 |
 | Add Folder… | | 3 |
 | — | | |
-| Close Playlist | Ctrl+W | 4 ⏳ (becomes Close Tab) |
+| Close Tab | Ctrl+W | 5 |
+| Next Tab / Previous Tab | Ctrl+Tab / Ctrl+Shift+Tab | 5 |
 | Exit | | 1 |
 
 **Export Bundled Copy** is the "send this to a friend" action. It writes a new `.bday` with the
@@ -145,7 +146,7 @@ Acts on the selected track(s). **The track list's right-click menu shows the sam
 | — | | |
 | Fetch Lyrics | | 10 |
 | Show in File Manager | | 3 |
-| Properties… (read-only tags) | | 3 |
+| Properties… (read-only tags) | Alt+Enter | 3 / 5 |
 | — | | |
 | Reset All Overrides | | 7 |
 
@@ -183,11 +184,14 @@ Designed in `PLAN.md` §5 (2026-10-28). Menu effects:
 
 ## Implementation notes
 
-**Built in Phase 4** from the table in `src/renderer/menus/commands.js`. Live now: all of File,
-Edit ▸ Undo/Redo, View ▸ Zoom, Playback (except Order/Repeat/Reshuffle/Stop After Current),
-Playlist ▸ Storage and Relink, Options ▸ Folder Mappings, Help ▸ Keyboard Shortcuts and About.
-**Track** shows dimmed and doesn't open: every Track item acts on the selection, which arrives
-in Phase 5. The empty playlist view keeps Add files/folder buttons as a convenience.
+**Built in Phase 4** from the table in `src/renderer/menus/commands.js`; Phase 5 added the
+selection-based items. Live now: all of File (incl. Close / Next / Previous Tab), all of Edit
+except Find, View (Collapse/Expand All, Jump to Now Playing, Zoom), Playback (except
+Order/Repeat/Reshuffle/Stop After Current), Playlist ▸ Grouping (Off / By Album / By Artist),
+Storage and Relink, Track ▸ Show in File Manager and Properties (Alt+Enter), Options ▸ Folder
+Mappings and Restore Tabs on Startup, and Help. Right-clicking a track opens the Track menu plus
+Cut / Copy / Paste / Remove. The empty playlist view keeps Add files/folder buttons as a
+convenience.
 
 - The window is frameless, so these are **React dropdowns**, not a native `Menu`. Define every
   menu from **one data structure** (`id`, `label`, `shortcut`, `enabledWhen`, `action`) so that

@@ -16,9 +16,13 @@
     "start:dist": "npm run build && cross-env-shell BEACHDAY_LOAD_DIST=1 electron .",
     "pack:linux": "npm run build && electron-builder --linux",
     "pack:win": "npm run build && electron-builder --win",
-    "pack:all": "npm run build && electron-builder --linux --win"
+    "pack:all": "npm run build && electron-builder --linux --win",
+    "test": "node tests/run-unit.mjs && node tests/run-e2e.mjs",
+    "test:unit": "node tests/run-unit.mjs",
+    "test:e2e": "node tests/run-e2e.mjs"
   },
   "devDependencies": {
+    "@tanstack/react-virtual": "^3.14.23",
     "@vitejs/plugin-react": "^6.1.2",
     "concurrently": "^9.1.2",
     "cross-env": "^7.0.3",

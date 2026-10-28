@@ -7,7 +7,7 @@ import { useSyncExternalStore } from 'react';
 
 const listeners = new Set();
 let state = {
-  /** null | 'relink' | 'mappings' | 'shortcuts' | 'about' */
+  /** null | 'relink' | 'mappings' | 'shortcuts' | 'about' | 'properties' */
   dialog: null,
   /** null | { label, fraction? } — a save or import in progress */
   busy: null,
@@ -15,6 +15,10 @@ let state = {
   notice: null,
   /** Open Recent entries, refreshed after every open and save */
   recentFiles: [],
+  /** Options ▸ Restore Tabs on Startup (mirrors app config) */
+  restoreTabs: true,
+  /** Ask the track list to scroll a row into view: { playlistId, trackId, nonce } */
+  scrollRequest: null,
 };
 
 const NOTICE_MS = 5000;
@@ -41,6 +45,12 @@ export function notify(notice) {
   set({ notice });
   noticeTimer = setTimeout(() => set({ notice: null }), NOTICE_MS);
 }
+
+export const setRestoreTabs = (restoreTabs) => set({ restoreTabs });
+
+let scrollNonce = 0;
+export const requestScroll = (playlistId, trackId) =>
+  set({ scrollRequest: { playlistId, trackId, nonce: ++scrollNonce } });
 
 export async function refreshRecent() {
   set({ recentFiles: await window.beachday.playlist.recent() });

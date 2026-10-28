@@ -28,37 +28,59 @@ export function getContext() {
   const playlist = playlists[viewedId];
   return {
     playlist,
+    selected: playlist?.loaded ? store.selectedIds(playlist) : [],
+    tabCount: store.getState().order.length,
     playerState: player.getState(),
     recentFiles: ui.getState().recentFiles,
+    restoreTabs: ui.getState().restoreTabs,
     busy: Boolean(ui.getState().busy),
   };
 }
 
 const idle = (ctx) => !ctx.busy;
+/** Idle, and the viewed tab is loaded (a restored tab may not be yet). */
+const ready = (ctx) => idle(ctx) && Boolean(ctx.playlist?.loaded);
+const hasSelection = (ctx) => ready(ctx) && ctx.selected.length > 0;
+/** Exactly one selected track, and it isn't missing. */
+const oneFound = (ctx) =>
+  ready(ctx) && ctx.selected.length === 1 && ctx.playlist.resolution[ctx.selected[0]]?.status === 'ok';
+const grouped = (ctx) => ready(ctx) && Boolean(ctx.playlist.doc.grouping);
 
 export const COMMANDS = {
   // --- File ---
   'file.new': { label: 'New Playlist', shortcut: 'Ctrl+N', enabled: idle, run: actions.newPlaylist },
   'file.open': { label: 'Open Playlist…', shortcut: 'Ctrl+O', enabled: idle, run: () => actions.openPlaylist() },
-  'file.save': { label: 'Save', shortcut: 'Ctrl+S', enabled: idle, run: () => actions.saveViewed() },
+  'file.save': { label: 'Save', shortcut: 'Ctrl+S', enabled: ready, run: () => actions.saveViewed() },
   'file.saveAs': {
     label: 'Save As…',
     shortcut: 'Ctrl+Shift+S',
-    enabled: idle,
+    enabled: ready,
     run: () => actions.saveViewed({ saveAs: true }),
   },
   'file.exportBundled': {
     label: 'Export Bundled Copy…',
-    enabled: (ctx) => idle(ctx) && ctx.playlist?.doc.tracks.length > 0,
+    enabled: (ctx) => ready(ctx) && ctx.playlist.doc.tracks.length > 0,
     run: () => actions.saveViewed({ storage: 'bundled', copy: true }),
   },
-  'file.addFiles': { label: 'Add Files…', enabled: idle, run: actions.addFiles },
-  'file.addFolder': { label: 'Add Folder…', enabled: idle, run: actions.addFolder },
-  'file.close': {
-    label: 'Close Playlist',
+  'file.addFiles': { label: 'Add Files…', enabled: ready, run: actions.addFiles },
+  'file.addFolder': { label: 'Add Folder…', enabled: ready, run: actions.addFolder },
+  'file.closeTab': {
+    label: 'Close Tab',
     shortcut: 'Ctrl+W',
-    enabled: (ctx) => idle(ctx) && !store.isPristine(ctx.playlist),
+    enabled: (ctx) => idle(ctx) && !(ctx.tabCount === 1 && store.isPristine(ctx.playlist)),
     run: actions.closeViewed,
+  },
+  'file.nextTab': {
+    label: 'Next Tab',
+    shortcut: 'Ctrl+Tab',
+    enabled: (ctx) => ctx.tabCount > 1,
+    run: () => store.viewAdjacent(1),
+  },
+  'file.previousTab': {
+    label: 'Previous Tab',
+    shortcut: 'Ctrl+Shift+Tab',
+    enabled: (ctx) => ctx.tabCount > 1,
+    run: () => store.viewAdjacent(-1),
   },
   // Goes through the window's close request, so unsaved changes are asked about.
   'file.exit': { label: 'Exit', run: () => window.beachday.window.close() },
@@ -77,8 +99,44 @@ export const COMMANDS = {
     enabled: (ctx) => idle(ctx) && ctx.playlist?.future.length > 0,
     run: actions.redo,
   },
+  'edit.cut': { label: 'Cut', shortcut: 'Ctrl+X', enabled: hasSelection, run: actions.cutSelection },
+  'edit.copy': { label: 'Copy', shortcut: 'Ctrl+C', enabled: hasSelection, run: actions.copySelection },
+  'edit.paste': {
+    label: 'Paste',
+    shortcut: 'Ctrl+V',
+    enabled: (ctx) => ready(ctx) && actions.hasClipboard(),
+    run: actions.paste,
+  },
+  'edit.selectAll': {
+    label: 'Select All',
+    shortcut: 'Ctrl+A',
+    enabled: (ctx) => ready(ctx) && ctx.playlist.doc.tracks.length > 0,
+    run: (ctx) => store.selectAll(ctx.playlist.id),
+  },
+  'edit.remove': {
+    label: 'Remove from Playlist',
+    shortcut: 'Delete',
+    enabled: hasSelection,
+    run: actions.removeSelection,
+  },
 
   // --- View ---
+  'view.collapseAll': {
+    label: 'Collapse All Groups',
+    enabled: grouped,
+    run: (ctx) => store.setAllCollapsed(ctx.playlist.id, true),
+  },
+  'view.expandAll': {
+    label: 'Expand All Groups',
+    enabled: grouped,
+    run: (ctx) => store.setAllCollapsed(ctx.playlist.id, false),
+  },
+  'view.jumpToNowPlaying': {
+    label: 'Jump to Now Playing',
+    shortcut: 'Ctrl+J',
+    enabled: (ctx) => Boolean(ctx.playerState.current) && store.getState().order.includes(store.getState().playingId),
+    run: actions.jumpToNowPlaying,
+  },
   'view.zoomIn': { label: 'Zoom In', shortcut: 'Ctrl+=', run: () => window.beachday.view.zoomIn() },
   'view.zoomOut': { label: 'Zoom Out', shortcut: 'Ctrl+-', run: () => window.beachday.view.zoomOut() },
   'view.resetZoom': { label: 'Reset Zoom', shortcut: 'Ctrl+0', run: () => window.beachday.view.resetZoom() },
@@ -87,11 +145,11 @@ export const COMMANDS = {
   'playback.playPause': {
     label: (ctx) => (ctx.playerState.status === 'playing' ? 'Pause' : 'Play'),
     shortcut: 'Space',
-    run: () => {
-      // Nothing loaded yet: start the viewed playlist from the top.
-      const { playingId, viewedId } = store.getState();
-      if (!playingId) store.play(viewedId, 0);
-      else player.togglePlay();
+    run: (ctx) => {
+      // Nothing loaded yet: start the viewed playlist — from the selection, or the top.
+      if (store.getState().playingId || !ctx.playlist?.loaded) return player.togglePlay();
+      const first = ctx.selected[0] ?? store.layoutOf(ctx.playlist).order[0];
+      if (first) store.play(ctx.playlist.id, first);
     },
   },
   'playback.stop': { label: 'Stop', run: () => player.stop() },
@@ -112,26 +170,62 @@ export const COMMANDS = {
   },
 
   // --- Playlist ---
+  'playlist.grouping.off': {
+    label: 'Off',
+    checked: (ctx) => !ctx.playlist?.doc.grouping,
+    enabled: ready,
+    run: (ctx) => store.setGrouping(ctx.playlist.id, null),
+  },
+  'playlist.grouping.album': {
+    label: 'By Album',
+    checked: (ctx) => ctx.playlist?.doc.grouping?.preset === 'album',
+    enabled: ready,
+    run: (ctx) => store.setGrouping(ctx.playlist.id, 'album'),
+  },
+  'playlist.grouping.artist': {
+    label: 'By Artist',
+    checked: (ctx) => ctx.playlist?.doc.grouping?.preset === 'artist',
+    enabled: ready,
+    run: (ctx) => store.setGrouping(ctx.playlist.id, 'artist'),
+  },
   'playlist.storage.reference': {
     label: 'Reference',
     checked: (ctx) => ctx.playlist?.storage === 'reference',
-    enabled: idle,
+    enabled: ready,
     run: () => actions.setStorage('reference'),
   },
   'playlist.storage.bundled': {
     label: 'Bundled',
     checked: (ctx) => ctx.playlist?.storage === 'bundled',
-    enabled: idle,
+    enabled: ready,
     run: () => actions.setStorage('bundled'),
   },
   'playlist.relink': {
     label: 'Find Missing Tracks / Relink…',
-    enabled: (ctx) => ctx.playlist && store.missingCount(ctx.playlist) > 0,
+    enabled: (ctx) => ready(ctx) && store.missingCount(ctx.playlist) > 0,
     run: () => ui.openDialog('relink'),
+  },
+
+  // --- Track (acts on the selection) ---
+  'track.showInFolder': {
+    label: 'Show in File Manager',
+    enabled: oneFound,
+    run: actions.showSelectedInFolder,
+  },
+  'track.properties': {
+    label: 'Properties…',
+    shortcut: 'Alt+Enter',
+    enabled: hasSelection,
+    run: () => ui.openDialog('properties'),
   },
 
   // --- Options ---
   'options.folderMappings': { label: 'Folder Mappings…', run: () => ui.openDialog('mappings') },
+  'options.restoreTabs': {
+    label: 'Restore Tabs on Startup',
+    checked: (ctx) => ctx.restoreTabs,
+    run: actions.toggleRestoreTabs,
+  },
 
   // --- Help ---
   'help.shortcuts': { label: 'Keyboard Shortcuts', run: () => ui.openDialog('shortcuts') },
@@ -139,6 +233,12 @@ export const COMMANDS = {
 };
 
 const fileName = (filePath) => filePath.split(/[\\/]/).pop();
+
+/** The Track menu, also the track list's right-click menu (MENUS.md). */
+export const TRACK_ITEMS = ['track.showInFolder', 'track.properties'];
+
+/** Right-click on a track: the Track menu, plus the clipboard and Remove. */
+export const TRACK_CONTEXT_ITEMS = [...TRACK_ITEMS, '-', 'edit.cut', 'edit.copy', 'edit.paste', '-', 'edit.remove'];
 
 /**
  * The bar (order agreed in MENUS.md). Items: a command id, '-' for a
@@ -168,12 +268,29 @@ export const MENUS = [
       'file.addFiles',
       'file.addFolder',
       '-',
-      'file.close',
+      'file.closeTab',
+      'file.nextTab',
+      'file.previousTab',
+      '-',
       'file.exit',
     ],
   },
-  { label: 'Edit', items: ['edit.undo', 'edit.redo'] },
-  { label: 'View', items: ['view.zoomIn', 'view.zoomOut', 'view.resetZoom'] },
+  {
+    label: 'Edit',
+    items: ['edit.undo', 'edit.redo', '-', 'edit.cut', 'edit.copy', 'edit.paste', '-', 'edit.selectAll', 'edit.remove'],
+  },
+  {
+    label: 'View',
+    items: [
+      'view.collapseAll',
+      'view.expandAll',
+      'view.jumpToNowPlaying',
+      '-',
+      'view.zoomIn',
+      'view.zoomOut',
+      'view.resetZoom',
+    ],
+  },
   {
     label: 'Playback',
     items: [
@@ -190,13 +307,14 @@ export const MENUS = [
   {
     label: 'Playlist',
     items: [
+      { label: 'Grouping', items: ['playlist.grouping.off', 'playlist.grouping.album', 'playlist.grouping.artist'] },
+      '-',
       { label: 'Storage', items: ['playlist.storage.reference', 'playlist.storage.bundled'] },
       'playlist.relink',
     ],
   },
-  // Every Track item acts on the selection, which arrives with Phase 5.
-  { label: 'Track', items: [], emptyHint: 'Track editing arrives with selection in Phase 5' },
-  { label: 'Options', items: ['options.folderMappings'] },
+  { label: 'Track', items: TRACK_ITEMS },
+  { label: 'Options', items: ['options.folderMappings', 'options.restoreTabs'] },
   { label: 'Help', items: ['help.shortcuts', '-', 'help.about'] },
 ];
 

@@ -14,8 +14,7 @@ const SEEK_STEP_S = 5;
  * The playback-order (shuffle) button arrives with Phase 8.
  */
 export default function Transport() {
-  const { queue, index, status, duration, volume, muted, error } = usePlayer();
-  const track = queue[index];
+  const { current: track, status, duration, volume, muted, error } = usePlayer();
   const isPlaying = status === 'playing';
 
   return (

@@ -106,8 +106,16 @@ class Player {
   #listeners = new Set();
   #state = {
     queue: [],
-    /** Index of the current track, or -1. */
+    /** Index of the current track in the queue, or -1 (none, or detached — see below). */
     index: -1,
+    /** The track loaded for playback, even if it has since left the queue. */
+    current: null,
+    /**
+     * When the current track is removed from its playlist it keeps playing,
+     * "detached": index is -1 and this is the queue position it occupied, so
+     * Next plays whatever now sits there. null while attached.
+     */
+    detachedAt: null,
     /** 'empty' | 'stopped' | 'playing' | 'paused' */
     status: 'empty',
     duration: 0,
@@ -143,22 +151,47 @@ class Player {
    * The current track keeps playing and keeps its place, found by id.
    */
   setQueue(queue) {
-    const current = this.#state.queue[this.#state.index];
+    const { current, status } = this.#state;
     const index = current ? queue.findIndex((track) => track.id === current.id) : -1;
-
-    if (current && index < 0) {
-      // The playing track left its playlist (for example, its add was undone).
-      this.#active?.clear();
-      this.#idle?.clear();
-      this.#set({ queue, index: -1, status: queue.length ? 'stopped' : 'empty', duration: 0, error: null });
-      return;
-    }
 
     // A preload for a track that's no longer queued is wasted; #maybePreload
     // picks the right one on the next timeupdate.
     if (this.#idle && !queue.some((track) => this.#idle.holds(track))) this.#idle.clear();
-    const { status } = this.#state;
-    this.#set({ queue, index, status: !queue.length ? 'empty' : status === 'empty' ? 'stopped' : status });
+
+    if (current && index < 0) {
+      // The current track left its playlist (removed, cut, its add undone).
+      // Keep playing it; remember where it was so Next carries on from there.
+      const previous = this.#state.queue;
+      const kept = new Set(queue.map((track) => track.id));
+      const was = this.#state.index >= 0 ? this.#state.index : (this.#state.detachedAt ?? previous.length);
+      const detachedAt = Math.min(
+        previous.slice(0, was).filter((track) => kept.has(track.id)).length,
+        queue.length
+      );
+      this.#set({ queue, index: -1, detachedAt });
+      return;
+    }
+
+    this.#set({
+      queue,
+      index,
+      current: index >= 0 ? queue[index] : current,
+      detachedAt: index >= 0 ? null : this.#state.detachedAt,
+      status: status === 'empty' && queue.length ? 'stopped' : status,
+    });
+  }
+
+  /** Stop and forget everything: the playing playlist is gone. */
+  clear() {
+    this.#active?.clear();
+    this.#idle?.clear();
+    this.#set({ queue: [], index: -1, current: null, detachedAt: null, status: 'empty', duration: 0, error: null });
+  }
+
+  /** The position Next/Previous count from. */
+  #cursor() {
+    const { index, detachedAt } = this.#state;
+    return index >= 0 ? index : (detachedAt ?? 0) - 0.5;
   }
 
   // --- Transport ----------------------------------------------------------
@@ -169,11 +202,11 @@ class Player {
   }
 
   togglePlay() {
-    const { status, index, queue } = this.#state;
+    const { status, index, queue, current } = this.#state;
     if (status === 'playing') this.pause();
     else if (status === 'paused') this.#resume();
     // Stopped with the track still loaded: play from wherever it was seeked to.
-    else if (status === 'stopped' && index >= 0 && this.#active?.holds(queue[index])) this.#resume();
+    else if (status === 'stopped' && this.#active?.holds(current)) this.#resume();
     else {
       const start = index >= 0 ? index : nextIndex(-1, queue);
       if (start >= 0) this.#start(start);
@@ -195,14 +228,12 @@ class Player {
   }
 
   next() {
-    const { index, queue } = this.#state;
-    const target = nextIndex(index, queue);
+    const target = nextIndex(Math.floor(this.#cursor()), this.#state.queue);
     if (target >= 0) this.#start(target);
   }
 
   previous() {
-    const { index, queue } = this.#state;
-    const target = previousIndex(index, queue);
+    const target = previousIndex(Math.ceil(this.#cursor()), this.#state.queue);
     if (this.getPosition() > RESTART_THRESHOLD_S || target < 0) this.seek(0);
     else this.#start(target);
   }
@@ -297,7 +328,14 @@ class Player {
       // Missing audio (not relinked). Automatic advance never lands here.
       this.#active.clear();
       this.#idle.clear();
-      this.#set({ index, status: 'stopped', duration: 0, error: { index, message: `"${track.title}" is missing` } });
+      this.#set({
+        index,
+        current: track,
+        detachedAt: null,
+        status: 'stopped',
+        duration: 0,
+        error: { index, message: `"${track.title}" is missing` },
+      });
       return;
     }
 
@@ -312,6 +350,8 @@ class Player {
     const { duration } = this.#active.element;
     this.#set({
       index,
+      current: track,
+      detachedAt: null,
       status: 'playing',
       duration: Number.isFinite(duration) ? duration : 0,
       error: null,
@@ -342,14 +382,13 @@ class Player {
     if (!Number.isFinite(element.duration)) return;
     if (element.duration - element.currentTime > PRELOAD_WINDOW_S) return;
 
-    const { index, queue } = this.#state;
-    const target = nextIndex(index, queue);
+    const { queue } = this.#state;
+    const target = nextIndex(Math.floor(this.#cursor()), queue);
     if (target >= 0 && !this.#idle.holds(queue[target])) this.#idle.load(queue[target]);
   }
 
   #advance() {
-    const { index, queue } = this.#state;
-    const target = nextIndex(index, queue);
+    const target = nextIndex(Math.floor(this.#cursor()), this.#state.queue);
     if (target >= 0) {
       this.#start(target);
     } else {

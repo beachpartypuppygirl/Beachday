@@ -2,7 +2,7 @@
 
 Audio player and playlist curation tool for local music files. Linux + Windows.
 
-**Status:** Phases 1–4 complete; Phase 5 next.
+**Status:** Phases 1–5 complete; Phase 6 next.
 **Last updated:** 2026-10-28
 
 ---
@@ -387,7 +387,7 @@ should land while the codebase is small.
 | 2 | **Audio engine** — **DONE** | mp3/flac/wav play; seek, volume, play/pause/stop/next/prev; sequential order; transport bar; **dual-element preload** (§5) | Low |
 | 3 | **Metadata + import** — **DONE** | Folder/file import reads tags and embedded art; art cached to disk; tracks render in a flat list | Low–Med |
 | 4 | **Playlist format** — **DONE** | `.bday` saves and loads in both modes; **relink flow works across a simulated Linux→Windows path change**; multi-playlist store with per-playlist undo history (§5); **menu system** built from the `MENUS.md` table | **High** |
-| 5 | **Track list** | Virtualized flat list → group headers → collapse → drag-reorder → multi-select, smooth at 5,000 tracks; playlist tab strip with session restore (§5) | **High** |
+| 5 | **Track list** — **DONE** | Virtualized flat list → group headers → collapse → drag-reorder → multi-select, smooth at 5,000 tracks; playlist tab strip with session restore (§5) | **High** |
 | 6 | **Art pane** | Large art with resizable split; GIF support with import guardrail; art resolution chain | Med |
 | 7 | **Playlist-side metadata** | Per-track rename / custom art / dB; playlist name, description, author, cover; subgroup editor | Med |
 | 8 | **Shuffle + links** | Permutation-cursor shuffle; shuffle-remaining; contiguous chains with multi-select Link/Unlink; mid-chain click behaviour; repeat modes | Med |
@@ -620,4 +620,70 @@ import → undo/redo (menu label and Ctrl+Z/Ctrl+Y) → play → save → bundle
 export copy → extract mid-song + seek → open the Windows playlist → relink → play a missing
 track → quit with Cancel, then Don't Save. All 19 end-to-end checks and 6 unit-test groups passed. A packaged build contains
 yazl/yauzl and launches.
+
+---
+
+## 13. Phase 5 — Complete (2026-10-28)
+
+Done-when met: virtualized list → group headers → collapse → drag-reorder → multi-select,
+**smooth at 5,000 tracks**, plus the tab strip with session restore.
+
+Measured with 5,000 tracks in 600 groups: open 30ms, turn grouping on 41ms, scroll median
+8ms per 1,500px jump (worst 34ms), 58 rows in the DOM. Grouped layout alone: ~7ms.
+
+### What's built
+
+- **Grouping** (`store/grouping.js`): token templates, with By Album and By Artist as presets.
+  Headers follow the reference skin: thumbnail, main name in `--highlight`, sub-name, a detail
+  line (`Nintendo Switch | mp3 128 kbps | 1 Track | Time: 2:00`, empty segments dropped), and
+  the year. A group with no art gets a lettered block from the palette, the last step of the
+  §5 art chain.
+- **Flattened row model** with fixed row heights (track 22px, group 74px). The virtualizer
+  (`@tanstack/react-virtual`) renders on-screen rows only. Pointer y maps to a row by binary
+  search over cumulative offsets.
+- **Selection**: click, Ctrl+click, Shift+click, arrows / Home / End / PageUp / PageDown
+  (Shift extends), Enter plays, Ctrl+A. Clicking a group header selects its tracks.
+- **Drag to reorder** is hand-rolled on pointer events (HTML5 drag-and-drop fights
+  virtualization), with a drop line, a drag label, and auto-scroll at the edges. Group headers
+  drag whole groups.
+- **Edit**: Cut / Copy / Paste (an in-app clipboard; how tracks move between playlists), Remove
+  (Delete). All undoable.
+- **Tabs** (`TabStrip.jsx`) atop the list pane, per §5: ♪ on the playing tab, • when unsaved,
+  × or middle-click to close, + or double-click empty strip for new, Ctrl+Tab /
+  Ctrl+Shift+Tab, scroll position remembered per tab. New and Open now open *alongside*;
+  an untouched empty tab is reused.
+- **Session restore**: saved tabs persist to `config.json`. On launch they come back unloaded,
+  and the active one loads immediately. A tab whose file has gone says so and offers Locate… /
+  Close Tab. Options ▸ Restore Tabs on Startup turns it off.
+- **Track menu + right-click**: Show in File Manager (a bundled track shows its .bday) and
+  Properties (read-only tags, format, ReplayGain, location; totals for several tracks). The
+  right-click menu adds Cut / Copy / Paste / Remove.
+- **View**: Collapse All / Expand All Groups, Jump to Now Playing (Ctrl+J: switches tab,
+  expands the group, selects and centres the row).
+
+### Decisions made while building
+
+- **Playback follows the grouped display order**, so what you see is what plays. Groups appear
+  in the order of their first track in the playlist; within a group, playlist order holds.
+- **In a grouped view, tracks drag only within their own group.** Their tags decide the group,
+  so a track dropped elsewhere would jump straight back. Pinning a track to another group is
+  Track ▸ Move to Group (Phase 7). Mixed-group selections can't be dragged; the drag label
+  greys out.
+- **Collapse state is view state.** It isn't undoable and doesn't mark the playlist unsaved,
+  but it's written into the .bday's `groups` on save (§5: it travels).
+- **Removing the playing track doesn't stop it.** It plays on "detached", and Next continues
+  from where it was. This covers Delete, Cut and undoing its add.
+- **Imports don't select what they add; Paste does**, so pasted tracks can be moved straight away.
+- **Loaded tabs stay loaded.** §5 allows unloading inactive tabs, but at these memory sizes it
+  isn't worth the complexity yet.
+- Not built: dragging tabs to reorder them. Small, if wanted.
+
+### Testing
+
+33 end-to-end checks through the real `main.mjs`, using real mouse and keyboard input via
+`sendInputEvent` (clicks with modifiers, drags, shortcuts), plus a second launch to verify
+session restore and a missing-file tab. The Phase 4 suite (19) was re-run green against the
+new tab behaviour. Pure modules (`grouping.js`, `bday`, `relink`) have plain-Node tests.
+All of it now lives in the repo under `tests/` (`npm test`), built on throwaway copies of the
+git-ignored test tracks.
 

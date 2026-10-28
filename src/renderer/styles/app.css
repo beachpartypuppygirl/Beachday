@@ -237,7 +237,8 @@ button {
 .pane--list {
   background: var(--surface);
   border-left: 1px solid var(--border);
-  overflow-y: auto;
+  /* The track list scrolls inside itself, under the tabs and header. */
+  overflow: hidden;
 }
 
 .placeholder {
@@ -280,18 +281,10 @@ button {
 .tracklist {
   display: flex;
   flex-direction: column;
-  min-height: 100%;
-}
-
-.tracklist--dragover {
-  outline: 2px dashed var(--highlight);
-  outline-offset: -6px;
+  height: 100%;
 }
 
 .tracklist__header {
-  position: sticky;
-  top: 0;
-  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -362,6 +355,11 @@ button {
   color: var(--text-muted);
 }
 
+/* Inside the scroll area (an empty playlist), fill it so the message centres. */
+.tracklist__scroll > .tracklist__empty {
+  min-height: 100%;
+}
+
 .tracklist__empty p {
   margin: 0;
 }
@@ -371,25 +369,67 @@ button {
   font-size: 12px;
 }
 
-.tracklist__rows {
-  margin: 0;
-  padding: 4px 0;
-  list-style: none;
+.tracklist__scroll {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  outline: none;
+}
+
+.tracklist__scroll--dragover {
+  outline: 2px dashed var(--highlight);
+  outline-offset: -6px;
+}
+
+.tracklist__scroll--dragging,
+.tracklist__scroll--dragging * {
+  cursor: grabbing;
+}
+
+.tracklist__canvas {
+  position: relative;
+  width: 100%;
+}
+
+/* Rows are positioned by the virtualizer (transform: translateY). */
+.tracklist__canvas > .track,
+.tracklist__canvas > .group,
+.tracklist__drop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
+
+.tracklist__drop {
+  z-index: 2;
+  height: 2px;
+  background: var(--highlight);
+  box-shadow: 0 0 6px var(--highlight);
+  pointer-events: none;
 }
 
 .track {
   display: grid;
   grid-template-columns: 3ch minmax(0, 3fr) minmax(0, 2fr) 5ch;
   gap: 12px;
-  align-items: baseline;
-  padding: 2px 12px 2px 17px;
+  align-items: center;
+  padding: 0 12px 0 17px;
   border-left: 3px solid transparent;
   font-size: 13px;
-  line-height: 1.35;
   color: var(--text-secondary);
 }
 
-.track:nth-child(even) {
+.track--grouped {
+  grid-template-columns: 3ch minmax(0, 1fr) 5ch;
+}
+
+.track--grouped.track--missing {
+  grid-template-columns: 3ch minmax(0, 1fr) auto 5ch;
+}
+
+.track--odd {
   background: color-mix(in srgb, var(--surface-raised) 45%, transparent);
 }
 
@@ -397,11 +437,23 @@ button {
   background: var(--surface-hover);
 }
 
-.track--current,
-.track--current:nth-child(even) {
-  border-left-color: var(--highlight);
-  background: var(--surface-raised);
+.track--selected,
+.track--selected:hover {
+  background: color-mix(in srgb, var(--accent) 24%, var(--surface));
   color: var(--text-primary);
+}
+
+.tracklist__scroll:focus .track--focus {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+.track--current {
+  border-left-color: var(--highlight);
+  color: var(--text-primary);
+}
+
+.track--current:not(.track--selected) {
+  background: var(--surface-raised);
 }
 
 .track--missing {
@@ -857,6 +909,10 @@ kbd {
   font-size: 12.5px;
 }
 
+.about__row {
+  display: contents;
+}
+
 .about dt {
   color: var(--text-muted);
 }
@@ -866,5 +922,243 @@ kbd {
   font-family: var(--font-mono);
   color: var(--text-secondary);
   user-select: text;
+}
+
+/* --------------------------------------------------------------------------
+   Group headers (laid out after the reference skin)
+   -------------------------------------------------------------------------- */
+
+.group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px 6px 4px;
+  border-left: 3px solid transparent;
+  border-top: 1px solid var(--border);
+}
+
+.group:hover {
+  background: color-mix(in srgb, var(--surface-hover) 60%, transparent);
+}
+
+.group--selected,
+.group--selected:hover {
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+}
+
+.group--playing {
+  border-left-color: var(--highlight);
+}
+
+.group__toggle {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 24px;
+  font-size: 15px;
+  color: var(--text-muted);
+  transform: rotate(90deg);
+  transition: transform var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+.group__toggle:hover {
+  color: var(--text-primary);
+}
+
+.group--collapsed .group__toggle {
+  transform: none;
+}
+
+.group__art {
+  flex-shrink: 0;
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 2px;
+}
+
+.group__art--generated {
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--palette-primary) 55%, var(--surface-raised));
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.group__text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.group__main,
+.group__sub,
+.group__detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group__main {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--highlight);
+}
+
+.group__sub {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.group__detail {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.group__year {
+  flex-shrink: 0;
+  align-self: center;
+  font-size: 17px;
+  font-style: italic;
+  color: var(--highlight);
+}
+
+/* --------------------------------------------------------------------------
+   Tab strip
+   -------------------------------------------------------------------------- */
+
+.tabstrip {
+  display: flex;
+  align-items: stretch;
+  height: 32px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.tabstrip__tabs {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tab {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  max-width: 200px;
+  padding: 0 6px 0 12px;
+  border-right: 1px solid var(--border);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  cursor: default;
+}
+
+.tab:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.tab--viewed,
+.tab--viewed:hover {
+  background: var(--surface);
+  color: var(--text-primary);
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.tab--unloaded .tab__name {
+  font-style: italic;
+}
+
+.tab--broken .tab__name {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.tab__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab__playing,
+.tab__dirty {
+  flex-shrink: 0;
+  color: var(--highlight);
+}
+
+.tab__close {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-muted);
+  opacity: 0;
+}
+
+.tab:hover .tab__close,
+.tab--viewed .tab__close {
+  opacity: 1;
+}
+
+.tab__close:hover {
+  background: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.tabstrip__new {
+  flex-shrink: 0;
+  width: 32px;
+  font-size: 17px;
+  color: var(--text-muted);
+}
+
+.tabstrip__new:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+/* --------------------------------------------------------------------------
+   Drag label and context menu
+   -------------------------------------------------------------------------- */
+
+.dragghost {
+  position: fixed;
+  z-index: 60;
+  max-width: 260px;
+  padding: 3px 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 4px;
+  background: var(--surface-raised);
+  border: 1px solid var(--highlight);
+  font-size: 12px;
+  color: var(--text-primary);
+  pointer-events: none;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.4);
+}
+
+.dragghost--blocked {
+  border-color: var(--border-strong);
+  color: var(--text-muted);
+}
+
+.contextmenu {
+  position: fixed;
+  z-index: 40;
+}
+
+.contextmenu > .menu {
+  position: static;
 }
 

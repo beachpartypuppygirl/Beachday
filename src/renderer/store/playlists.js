@@ -1,20 +1,25 @@
 import { player } from '../audio/engine.js';
+import { buildLayout, moveTracks, moveGroup, PRESETS } from './grouping.js';
 
 /**
  * The playlist store (PLAN.md §5 "Playlist tabs", "Undo / redo").
  *
- * Holds many open playlists at once — `order` is the future tab strip — and
- * tracks which one is viewed and which one is playing, which can differ.
- * Phase 4 shows one at a time; Phase 5 adds the tabs.
+ * Holds many open playlists — `order` is the tab strip — and tracks which one
+ * is viewed and which one is playing, which can differ.
  *
  * Each playlist separates:
  *   doc         the document: what a .bday saves. Immutable; every change
  *               produces a new doc through edit(), the one undoable path.
  *   resolution  this session's view of where each track's audio is
  *               (trackId -> { status, url, artUrl }). Not undoable, not saved.
+ *   view        selection and collapsed groups. Not undoable and not "dirty";
+ *               collapse state is written into the .bday when it's saved.
  *
  * Dirty means doc !== savedDoc. Undoing back to the saved state is clean
  * again for free, because it restores that exact object.
+ *
+ * A tab restored from the last session starts unloaded (loaded: false) and
+ * is filled in by loadInto() the first time it's viewed.
  */
 
 const HISTORY_LIMIT = 200;
@@ -41,7 +46,19 @@ const emptyDoc = () => ({
   tracks: [],
 });
 
-function makePlaylist({ filePath = null, storage = 'reference', doc = emptyDoc(), resolution = {} } = {}) {
+const emptyView = (collapsed = new Set()) => ({
+  collapsed,
+  selection: new Set(),
+  /** Shift+click extends from here. */
+  anchorId: null,
+  /** Keyboard focus row. */
+  focusId: null,
+});
+
+/** Collapsed group keys as stored in a document's `groups`. */
+const collapsedOf = (doc) => new Set((doc.groups ?? []).filter((g) => g.collapsed).map((g) => g.key));
+
+function makePlaylist({ filePath = null, storage = 'reference', doc = emptyDoc(), resolution = {}, loaded = true, name = '' } = {}) {
   return {
     id: `p${nextId++}`,
     filePath,
@@ -51,6 +68,12 @@ function makePlaylist({ filePath = null, storage = 'reference', doc = emptyDoc()
     past: [],
     future: [],
     resolution,
+    view: emptyView(collapsedOf(doc)),
+    loaded,
+    /** Unloaded tabs remember their name so the strip can label them. */
+    sessionName: name,
+    /** 'missing' when a restored tab's file has gone. */
+    loadError: null,
   };
 }
 
@@ -66,6 +89,11 @@ function updatePlaylist(id, patch) {
   set({ playlists: { ...state.playlists, [id]: { ...playlist, ...patch } } });
 }
 
+const updateView = (id, patch) => {
+  const playlist = state.playlists[id];
+  if (playlist) updatePlaylist(id, { view: { ...playlist.view, ...patch } });
+};
+
 // --- Reading -----------------------------------------------------------------
 
 export const subscribe = (listener) => {
@@ -79,6 +107,7 @@ export const isDirty = (playlist) => playlist.doc !== playlist.savedDoc;
 
 export function playlistName(playlist) {
   if (playlist.doc.meta.name) return playlist.doc.meta.name;
+  if (playlist.sessionName) return playlist.sessionName;
   if (playlist.filePath) return playlist.filePath.split(/[\\/]/).pop().replace(/\.bday$/i, '');
   return 'Untitled';
 }
@@ -107,29 +136,72 @@ export function trackView(track, resolution) {
   };
 }
 
-// --- Playlists ---------------------------------------------------------------
+// Layouts are cached per playlist and rebuilt only when an input changes.
+const layoutCache = new Map();
+
+/** The flattened row model for a playlist (grouping.js). */
+export function layoutOf(playlist) {
+  const { doc, resolution, view } = playlist;
+  const cached = layoutCache.get(playlist.id);
+  if (
+    cached &&
+    cached.tracks === doc.tracks &&
+    cached.grouping === doc.grouping &&
+    cached.resolution === resolution &&
+    cached.collapsed === view.collapsed
+  ) {
+    return cached.layout;
+  }
+  const layout = buildLayout(doc, resolution, view.collapsed);
+  layoutCache.set(playlist.id, { tracks: doc.tracks, grouping: doc.grouping, resolution, collapsed: view.collapsed, layout });
+  return layout;
+}
+
+/** Selected track ids in display order. */
+export function selectedIds(playlist) {
+  const { selection } = playlist.view;
+  if (selection.size === 0) return [];
+  return layoutOf(playlist).order.filter((id) => selection.has(id));
+}
+
+// --- Playlists and tabs ------------------------------------------------------
+
+function addPlaylist(playlist, { view = true } = {}) {
+  set({
+    playlists: { ...state.playlists, [playlist.id]: playlist },
+    order: [...state.order, playlist.id],
+    viewedId: view ? playlist.id : state.viewedId,
+  });
+  return playlist.id;
+}
 
 /** Add a new empty playlist and view it. */
-export function createPlaylist() {
-  const playlist = makePlaylist();
-  set({
-    playlists: { ...state.playlists, [playlist.id]: playlist },
-    order: [...state.order, playlist.id],
-    viewedId: playlist.id,
-  });
-  return playlist.id;
-}
+export const createPlaylist = () => addPlaylist(makePlaylist());
 
 /** Add a playlist that main opened from disk, and view it. */
-export function addOpenedPlaylist({ filePath, storage, doc, resolution }) {
-  const playlist = makePlaylist({ filePath, storage, doc, resolution });
-  set({
-    playlists: { ...state.playlists, [playlist.id]: playlist },
-    order: [...state.order, playlist.id],
-    viewedId: playlist.id,
+export const addOpenedPlaylist = (result) => addPlaylist(makePlaylist(result));
+
+/** Add a tab restored from the last session, not yet loaded. */
+export const addSessionTab = ({ filePath, name }) =>
+  addPlaylist(makePlaylist({ filePath, name, loaded: false }), { view: false });
+
+/** Fill an unloaded (or relocated) tab with what main opened. */
+export function loadInto(id, { filePath, storage, doc, resolution }) {
+  const playlist = state.playlists[id];
+  if (!playlist) return;
+  updatePlaylist(id, {
+    filePath,
+    storage,
+    doc,
+    savedDoc: doc,
+    resolution,
+    view: emptyView(collapsedOf(doc)),
+    loaded: true,
+    loadError: null,
   });
-  return playlist.id;
 }
+
+export const markLoadError = (id, loadError) => updatePlaylist(id, { loadError });
 
 /** The open playlist with this file, if any (opening it again just views it). */
 export const findByPath = (filePath) =>
@@ -139,16 +211,29 @@ export function viewPlaylist(id) {
   if (state.order.includes(id)) set({ viewedId: id });
 }
 
+/** Step through tabs: +1 next, -1 previous, wrapping. */
+export function viewAdjacent(step) {
+  const { order, viewedId } = state;
+  if (order.length < 2) return;
+  const i = order.indexOf(viewedId);
+  set({ viewedId: order[(i + step + order.length) % order.length] });
+}
+
 /**
- * Close a playlist. If it's playing, it keeps playing out of sight until
- * playback moves to another playlist; prompting for unsaved changes is the
- * caller's job (actions.js), so by now its document is settled.
+ * Close a tab. If it's playing, it keeps playing out of sight until playback
+ * moves to another playlist; prompting for unsaved changes is the caller's
+ * job (actions.js), so by now its document is settled.
  */
 export function closePlaylist(id) {
+  const index = state.order.indexOf(id);
   const order = state.order.filter((other) => other !== id);
   const playlists = { ...state.playlists };
-  if (id !== state.playingId) delete playlists[id];
-  const viewedId = state.viewedId === id ? (order.at(-1) ?? null) : state.viewedId;
+  if (id !== state.playingId) {
+    delete playlists[id];
+    layoutCache.delete(id);
+  }
+  // Closing the viewed tab views its neighbour, as browsers do.
+  const viewedId = state.viewedId === id ? (order[Math.min(index, order.length - 1)] ?? null) : state.viewedId;
   set({ playlists, order, viewedId });
   if (state.order.length === 0) createPlaylist();
 }
@@ -199,17 +284,112 @@ export function redo(id) {
   });
 }
 
-/** Append imported tracks ({ track, resolution } items from main). */
-export function addTracks(id, items) {
+const plural = (n, one, many) => (n === 1 ? one : many);
+
+/**
+ * Insert tracks ({ track, resolution } items) after `afterId` in playlist
+ * order, or at the end. Used by import (append) and paste; `select` selects
+ * the inserted tracks (paste does, so they can be moved straight away).
+ */
+export function insertTracks(id, items, { afterId = null, label, select = false } = {}) {
   if (!items.length) return;
-  mergeResolution(
-    id,
-    Object.fromEntries(items.map(({ track, resolution }) => [track.id, resolution]))
-  );
-  edit(id, items.length === 1 ? 'Add Track' : 'Add Tracks', (doc) => ({
+  mergeResolution(id, Object.fromEntries(items.map(({ track, resolution }) => [track.id, resolution])));
+  edit(id, label ?? plural(items.length, 'Add Track', 'Add Tracks'), (doc) => {
+    const at = afterId ? doc.tracks.findIndex((track) => track.id === afterId) + 1 : doc.tracks.length;
+    const inserted = items.map(({ track }) => track);
+    return { ...doc, tracks: [...doc.tracks.slice(0, at), ...inserted, ...doc.tracks.slice(at)] };
+  });
+  if (!select) return;
+  const last = items.at(-1).track.id;
+  updateView(id, { selection: new Set(items.map(({ track }) => track.id)), anchorId: items[0].track.id, focusId: last });
+}
+
+/** Append imported tracks. */
+export const addTracks = (id, items) => insertTracks(id, items);
+
+export function removeTracks(id, ids, label) {
+  if (!ids.length) return;
+  const removing = new Set(ids);
+  const playlist = state.playlists[id];
+  // Focus lands on the row after the removed block, so repeated Delete works.
+  const order = layoutOf(playlist).order;
+  const lastIndex = Math.max(...ids.map((trackId) => order.indexOf(trackId)));
+  const nextFocus = order.slice(lastIndex + 1).find((trackId) => !removing.has(trackId)) ??
+    [...order].reverse().find((trackId) => !removing.has(trackId)) ?? null;
+  edit(id, label ?? plural(ids.length, 'Remove Track', 'Remove Tracks'), (doc) => ({
     ...doc,
-    tracks: [...doc.tracks, ...items.map(({ track }) => track)],
+    tracks: doc.tracks.filter((track) => !removing.has(track.id)),
   }));
+  updateView(id, {
+    selection: nextFocus ? new Set([nextFocus]) : new Set(),
+    anchorId: nextFocus,
+    focusId: nextFocus,
+  });
+}
+
+/** Drag-reorder: move `ids` before `beforeId`, or after `afterId` (neither = end). */
+export function moveTracksTo(id, ids, { beforeId = null, afterId = null } = {}) {
+  edit(id, plural(ids.length, 'Move Track', 'Move Tracks'), (doc) => {
+    const tracks = moveTracks(doc.tracks, ids, beforeId, afterId);
+    return tracks === doc.tracks ? doc : { ...doc, tracks };
+  });
+}
+
+/** Drag-reorder a whole group before another (null = end). */
+export function moveGroupTo(id, key, beforeKey) {
+  const playlist = state.playlists[id];
+  const layout = layoutOf(playlist);
+  edit(id, 'Move Group', (doc) => {
+    const tracks = moveGroup(doc.tracks, layout, key, beforeKey);
+    return tracks === doc.tracks ? doc : { ...doc, tracks };
+  });
+}
+
+/** Playlist ▸ Grouping. `preset` is a PRESETS key, or null for off. */
+export function setGrouping(id, preset) {
+  const label = preset ? `Group by ${preset === 'album' ? 'Album' : 'Artist'}` : 'Turn Off Grouping';
+  edit(id, label, (doc) =>
+    (doc.grouping?.preset ?? null) === preset ? doc : { ...doc, grouping: preset ? PRESETS[preset] : null }
+  );
+}
+
+// --- View state (not undoable) -----------------------------------------------
+
+export function setSelection(id, ids, { anchorId, focusId } = {}) {
+  const playlist = state.playlists[id];
+  if (!playlist) return;
+  updateView(id, {
+    selection: new Set(ids),
+    anchorId: anchorId === undefined ? playlist.view.anchorId : anchorId,
+    focusId: focusId === undefined ? playlist.view.focusId : focusId,
+  });
+}
+
+export function selectAll(id) {
+  const playlist = state.playlists[id];
+  if (playlist) setSelection(id, layoutOf(playlist).order);
+}
+
+export function toggleCollapsed(id, key) {
+  const playlist = state.playlists[id];
+  if (!playlist) return;
+  const collapsed = new Set(playlist.view.collapsed);
+  if (collapsed.has(key)) collapsed.delete(key);
+  else collapsed.add(key);
+  updateView(id, { collapsed });
+}
+
+export function setAllCollapsed(id, isCollapsed) {
+  const playlist = state.playlists[id];
+  const groups = playlist && layoutOf(playlist).groups;
+  if (groups) updateView(id, { collapsed: isCollapsed ? new Set(groups.map((g) => g.key)) : new Set() });
+}
+
+/** Expand whichever group holds `trackId`, so it can be shown. */
+export function revealTrack(id, trackId) {
+  const playlist = state.playlists[id];
+  const group = playlist && layoutOf(playlist).groupOf.get(trackId);
+  if (group && playlist.view.collapsed.has(group.key)) toggleCollapsed(id, group.key);
 }
 
 // --- Not undoable ------------------------------------------------------------
@@ -239,15 +419,19 @@ export function markSaved(id, { filePath, storage, savedDoc, stored }) {
       tracks: savedDoc.tracks.map((track) => (stored[track.id] ? { ...track, ...stored[track.id] } : track)),
     };
   }
-  updatePlaylist(id, { filePath, storage, doc, savedDoc: saved });
+  updatePlaylist(id, { filePath, storage, doc, savedDoc: saved, sessionName: '' });
 }
 
 // --- Playback ----------------------------------------------------------------
 
-const queueOf = (playlist) => playlist.doc.tracks.map((track) => trackView(track, playlist.resolution));
+/** The engine's queue: display order, so grouped playlists play as shown. */
+const queueOf = (playlist) => {
+  const byId = new Map(playlist.doc.tracks.map((track) => [track.id, track]));
+  return layoutOf(playlist).order.map((id) => trackView(byId.get(id), playlist.resolution));
+};
 
-/** Start playing track `index` of playlist `id`. */
-export function play(id, index) {
+/** Start playing track `trackId` of playlist `id`. */
+export function play(id, trackId) {
   const playlist = state.playlists[id];
   if (!playlist) return;
   if (state.playingId !== id) {
@@ -256,23 +440,31 @@ export function play(id, index) {
     if (state.playingId && !state.order.includes(state.playingId)) delete playlists[state.playingId];
     set({ playlists, playingId: id });
   }
-  player.playIndex(index);
+  const index = layoutOf(state.playlists[id]).order.indexOf(trackId);
+  if (index >= 0) player.playIndex(index);
 }
 
-// The engine plays a flat queue. Whenever the playing playlist's tracks or
-// their resolution change, hand it the new queue; it keeps its place by id.
-let synced = { id: null, tracks: null, resolution: null };
+// The engine plays a flat queue. Whenever the playing playlist's order or
+// resolution changes, hand it the new queue; it keeps its place by id.
+let synced = { id: null, tracks: null, resolution: null, grouping: null };
 
 function syncQueue() {
   const playlist = state.playlists[state.playingId];
   if (!playlist) {
-    if (synced.id !== null) player.setQueue([]);
-    synced = { id: null, tracks: null, resolution: null };
+    if (synced.id !== null) player.clear();
+    synced = { id: null, tracks: null, resolution: null, grouping: null };
     return;
   }
-  const { tracks } = playlist.doc;
-  if (synced.id === playlist.id && synced.tracks === tracks && synced.resolution === playlist.resolution) return;
-  synced = { id: playlist.id, tracks, resolution: playlist.resolution };
+  const { tracks, grouping } = playlist.doc;
+  if (
+    synced.id === playlist.id &&
+    synced.tracks === tracks &&
+    synced.resolution === playlist.resolution &&
+    synced.grouping === grouping
+  ) {
+    return;
+  }
+  synced = { id: playlist.id, tracks, resolution: playlist.resolution, grouping };
   player.setQueue(queueOf(playlist));
 }
 

@@ -3,6 +3,7 @@ import * as store from '../store/playlists.js';
 import * as ui from '../store/ui.js';
 import * as actions from '../store/actions.js';
 import { COMMANDS } from '../menus/commands.js';
+import { formatTime } from '../format.js';
 
 /** Renders whichever dialog the ui store says is open. */
 export default function Dialogs() {
@@ -11,6 +12,7 @@ export default function Dialogs() {
   if (dialog === 'mappings') return <FolderMappingsDialog />;
   if (dialog === 'shortcuts') return <ShortcutsDialog />;
   if (dialog === 'about') return <AboutDialog />;
+  if (dialog === 'properties') return <PropertiesDialog />;
   return null;
 }
 
@@ -183,6 +185,73 @@ function FolderMappingsDialog() {
       )}
     </Modal>
   );
+}
+
+// --- Track properties (read-only; Beachday never writes tags) ---------------
+
+function PropertiesDialog() {
+  const state = useSyncExternalStore(store.subscribe, store.getState);
+  const playlist = state.playlists[state.viewedId];
+  const ids = store.selectedIds(playlist);
+  const byId = new Map(playlist.doc.tracks.map((track) => [track.id, track]));
+  const tracks = ids.map((id) => byId.get(id)).filter(Boolean);
+  const close = <button className="button" type="button" onClick={ui.closeDialog}>Close</button>;
+
+  if (tracks.length !== 1) {
+    const duration = tracks.reduce((sum, track) => sum + (track.tags.duration ?? 0), 0);
+    const size = tracks.reduce((sum, track) => sum + (track.size ?? 0), 0);
+    return (
+      <Modal title={`${tracks.length} tracks`} footer={close}>
+        <dl className="about">
+          <dt>Total time</dt>
+          <dd>{formatTime(duration)}</dd>
+          <dt>Total size</dt>
+          <dd>{formatBytes(size)}</dd>
+        </dl>
+      </Modal>
+    );
+  }
+
+  const [track] = tracks;
+  const { tags } = track;
+  const resolved = playlist.resolution[track.id];
+  const format = [tags.codec, tags.bitrate && `${tags.bitrate} kbps`, tags.sampleRate && `${tags.sampleRate / 1000} kHz`, tags.bitsPerSample && `${tags.bitsPerSample}-bit`]
+    .filter(Boolean)
+    .join(' · ');
+  const fields = [
+    ['Title', tags.title],
+    ['Artist', tags.artist],
+    ['Album artist', tags.albumArtist],
+    ['Album', tags.album],
+    ['Track', [tags.trackNo, tags.discNo && `disc ${tags.discNo}`].filter(Boolean).join(', ')],
+    ['Year', tags.year],
+    ['Genre', tags.genre],
+    ['Length', tags.duration != null ? formatTime(tags.duration) : null],
+    ['Format', format],
+    ['ReplayGain', tags.replayGainDb != null ? `${tags.replayGainDb > 0 ? '+' : ''}${tags.replayGainDb.toFixed(2)} dB` : null],
+    ['Size', track.size ? formatBytes(track.size) : null],
+    ['Location', resolved?.status === 'ok' ? (resolved.how === 'bundled' ? 'Inside this playlist (bundled)' : track.absPath) : `Missing — ${track.absPath ?? 'unknown'}`],
+  ].filter(([, value]) => value !== null && value !== undefined && value !== '');
+
+  return (
+    <Modal title="Track properties" wide footer={close}>
+      <p className="modal__text modal__text--muted">Read from the file’s tags. Beachday never changes them.</p>
+      <dl className="about">
+        {fields.map(([label, value]) => (
+          <div key={label} className="about__row">
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </Modal>
+  );
+}
+
+function formatBytes(bytes) {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${Math.round(bytes / 1024)} KB`;
 }
 
 // --- Help --------------------------------------------------------------------

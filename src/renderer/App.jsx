@@ -5,7 +5,7 @@ import Transport from './components/Transport.jsx';
 import Dialogs from './components/Dialogs.jsx';
 import { usePlayer } from './audio/usePlayer.js';
 import { handleShortcut, runCommand } from './menus/commands.js';
-import { requestAppClose } from './store/actions.js';
+import { requestAppClose, restoreSession } from './store/actions.js';
 
 /**
  * App shell. The layout mirrors PLAN.md §1: a large art pane on the left
@@ -15,6 +15,8 @@ import { requestAppClose } from './store/actions.js';
  * The art pane shows the playing track's embedded art, letterboxed. Phase 6
  * adds the draggable split, GIF guardrail and the full art resolution chain.
  */
+let sessionRestore = null;
+
 export default function App() {
   useEffect(() => {
     window.addEventListener('keydown', handleShortcut);
@@ -23,6 +25,11 @@ export default function App() {
 
   // Main asks before the window closes, so unsaved playlists can be settled.
   useEffect(() => window.beachday.app.onCloseRequested(requestAppClose), []);
+
+  // Reopen last session's tabs (once; StrictMode runs effects twice in dev).
+  useEffect(() => {
+    if (!sessionRestore) sessionRestore = restoreSession();
+  }, []);
 
   return (
     <div className="app">
@@ -49,8 +56,7 @@ export default function App() {
 }
 
 function ArtPane() {
-  const { queue, index, status } = usePlayer();
-  const track = status === 'empty' ? null : queue[index];
+  const { current: track } = usePlayer();
 
   if (track?.artUrl) {
     return <img className="art" src={track.artUrl} alt="" draggable={false} />;
