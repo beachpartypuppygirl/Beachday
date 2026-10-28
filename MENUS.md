@@ -183,6 +183,9 @@ Designed in `PLAN.md` §5 (2026-10-28). Menu effects:
 
 ## Implementation notes
 
+The menu system is built in **Phase 4**. Until then the bar's labels are inert, and the list
+header's Add files/folder buttons stand in for File ▸ Add.
+
 - The window is frameless, so these are **React dropdowns**, not a native `Menu`. Define every
   menu from **one data structure** (`id`, `label`, `shortcut`, `enabledWhen`, `action`) so that
   moving an item between menus is a one-line change, and so the Keyboard Shortcuts screen and

@@ -4,13 +4,17 @@ import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { Readable } from 'node:stream';
+import { resolveArtPath, ART_CONTENT_TYPES } from './art.mjs';
 
 /**
- * The beachday-media:// protocol: how the renderer's <audio> elements reach
- * local files without the renderer having filesystem access.
+ * The beachday-media:// protocol: how the renderer reaches local files
+ * without having filesystem access of its own.
  *
- * Main hands out an opaque URL per file the user has chosen
- * (beachday-media://track/<token>), and the handler serves only those. The
+ *   beachday-media://track/<token>   an audio file the user has chosen
+ *   beachday-media://art/<name>      an image in the art cache (art.mjs)
+ *
+ * Main hands out an opaque URL per audio file the user has chosen, and the
+ * handler serves only those. The
  * renderer can't construct a URL for an arbitrary path, and Windows paths
  * (drive letters, backslashes) never have to survive URL encoding.
  *
@@ -65,46 +69,65 @@ export function grantMediaUrl(filePath) {
   return `${MEDIA_SCHEME}://track/${token}`;
 }
 
+/** URL for an art cache entry returned by cacheArt(). */
+export function artUrl(name) {
+  return `${MEDIA_SCHEME}://art/${name}`;
+}
+
 /** Must run after app 'ready'. */
 export function handleMediaProtocol() {
   protocol.handle(MEDIA_SCHEME, async (request) => {
     const { hostname, pathname } = new URL(request.url);
-    const filePath = hostname === 'track' ? pathsByToken.get(pathname.slice(1)) : undefined;
-    if (!filePath) return new Response(null, { status: 404 });
+    const name = pathname.slice(1);
 
-    let size;
-    try {
-      size = (await stat(filePath)).size;
-    } catch {
-      return new Response(null, { status: 404 });
+    if (hostname === 'track') {
+      const filePath = pathsByToken.get(name);
+      const extension = filePath && path.extname(filePath).toLowerCase();
+      return serveFile(request, filePath, MIME_TYPES[extension]);
     }
-
-    const headers = {
-      'Content-Type': MIME_TYPES[path.extname(filePath).toLowerCase()] ?? 'application/octet-stream',
-      'Accept-Ranges': 'bytes',
-      'Access-Control-Allow-Origin': '*',
-    };
-
-    if (size === 0) return new Response(null, { status: 200, headers });
-
-    const range = parseRange(request.headers.get('range'), size);
-    if (range === null) {
-      return new Response(null, {
-        status: 416,
-        headers: { ...headers, 'Content-Range': `bytes */${size}` },
-      });
+    if (hostname === 'art') {
+      const filePath = resolveArtPath(name);
+      return serveFile(request, filePath, filePath && ART_CONTENT_TYPES[path.extname(filePath).slice(1)]);
     }
+    return new Response(null, { status: 404 });
+  });
+}
 
-    const { start, end } = range ?? { start: 0, end: size - 1 };
-    const body = Readable.toWeb(fs.createReadStream(filePath, { start, end }));
-    return new Response(body, {
-      status: range ? 206 : 200,
-      headers: {
-        ...headers,
-        'Content-Length': String(end - start + 1),
-        ...(range && { 'Content-Range': `bytes ${start}-${end}/${size}` }),
-      },
+async function serveFile(request, filePath, contentType) {
+  if (!filePath) return new Response(null, { status: 404 });
+
+  let size;
+  try {
+    size = (await stat(filePath)).size;
+  } catch {
+    return new Response(null, { status: 404 });
+  }
+
+  const headers = {
+    'Content-Type': contentType ?? 'application/octet-stream',
+    'Accept-Ranges': 'bytes',
+    'Access-Control-Allow-Origin': '*',
+  };
+
+  if (size === 0) return new Response(null, { status: 200, headers });
+
+  const range = parseRange(request.headers.get('range'), size);
+  if (range === null) {
+    return new Response(null, {
+      status: 416,
+      headers: { ...headers, 'Content-Range': `bytes */${size}` },
     });
+  }
+
+  const { start, end } = range ?? { start: 0, end: size - 1 };
+  const body = Readable.toWeb(fs.createReadStream(filePath, { start, end }));
+  return new Response(body, {
+    status: range ? 206 : 200,
+    headers: {
+      ...headers,
+      'Content-Length': String(end - start + 1),
+      ...(range && { 'Content-Range': `bytes ${start}-${end}/${size}` }),
+    },
   });
 }
 

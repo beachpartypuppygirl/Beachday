@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { player } from '../audio/engine.js';
 import { usePlayer, usePlaybackPosition } from '../audio/usePlayer.js';
+import { formatTime } from '../format.js';
 
 const SEEK_STEP_S = 5;
 
@@ -32,13 +33,16 @@ export default function Transport() {
   return (
     <footer className="transport">
       <div className="transport__row">
-        <div className="transport__now">
+        <div className="transport__now" title={track ? [track.album, track.title].filter(Boolean).join(' — ') : undefined}>
           {error ? (
             <span className="transport__error">{error.message}</span>
           ) : track ? (
-            <span className="transport__title" title={track.title}>
-              {track.title}
-            </span>
+            <>
+              {(track.album ?? track.artist) && (
+                <span className="transport__album">{track.album ?? track.artist}</span>
+              )}
+              <span className="transport__title">{track.title}</span>
+            </>
           ) : (
             <span className="transport__idle">Nothing playing</span>
           )}
@@ -217,12 +221,4 @@ function SeekBar({ duration, disabled }) {
       </div>
     </div>
   );
-}
-
-function formatTime(seconds) {
-  const total = Math.max(0, Math.floor(seconds || 0));
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = String(total % 60).padStart(2, '0');
-  return h ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
 }

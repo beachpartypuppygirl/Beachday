@@ -1,7 +1,8 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { registerMediaScheme, handleMediaProtocol, grantMediaUrl } from './media.mjs';
+import { registerMediaScheme, handleMediaProtocol } from './media.mjs';
+import { AUDIO_EXTENSIONS, collectAudioFiles, readTracks } from './metadata.mjs';
 
 // ESM has no __dirname; derive it from import.meta.url.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -12,8 +13,6 @@ const DEV_SERVER_URL = 'http://localhost:5173';
 // BEACHDAY_LOAD_DIST=1 forces the built bundle while still unpackaged,
 // which is how we smoke-test a production build without packaging it.
 const useDevServer = !app.isPackaged && process.env.BEACHDAY_LOAD_DIST !== '1';
-
-const AUDIO_EXTENSIONS = ['mp3', 'flac', 'wav', 'ogg', 'opus', 'm4a', 'aac'];
 
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
@@ -110,25 +109,43 @@ ipcMain.handle('app:get-info', () => ({
   packaged: app.isPackaged,
 }));
 
-// Phase 3 replaces this with real import (tags, embedded art). For now each
-// chosen file comes back with a playable beachday-media:// URL and its file
-// name standing in for a title.
-ipcMain.handle('dialog:open-audio-files', async (event) => {
-  const win = BrowserWindow.fromWebContents(event.sender);
-  const result = await dialog.showOpenDialog(win, {
-    title: 'Add tracks',
+// Import. Each handler resolves to track objects (metadata.mjs), already
+// ordered and with playable URLs granted. Progress goes out as
+// 'tracks:import-progress' events, so a large folder doesn't look frozen.
+
+async function importPaths(event, paths) {
+  const files = await collectAudioFiles(paths);
+  return readTracks(files, (done, total) => {
+    if (!event.sender.isDestroyed()) event.sender.send('tracks:import-progress', { done, total });
+  });
+}
+
+ipcMain.handle('tracks:pick-files', async (event) => {
+  const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender), {
+    title: 'Add files',
     properties: ['openFile', 'multiSelections'],
     filters: [
       { name: 'Audio', extensions: AUDIO_EXTENSIONS },
       { name: 'All Files', extensions: ['*'] },
     ],
   });
-  if (result.canceled) return [];
-  return result.filePaths.map((filePath) => ({
-    path: filePath,
-    title: path.parse(filePath).name,
-    url: grantMediaUrl(filePath),
-  }));
+  return result.canceled ? [] : importPaths(event, result.filePaths);
+});
+
+ipcMain.handle('tracks:pick-folder', async (event) => {
+  const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender), {
+    title: 'Add folder',
+    properties: ['openDirectory', 'multiSelections'],
+  });
+  return result.canceled ? [] : importPaths(event, result.filePaths);
+});
+
+// Paths come from files the user dropped on the window. The preload resolves
+// them from File objects (webUtils.getPathForFile), which page code can't
+// forge, so this still only reaches files the user chose.
+ipcMain.handle('tracks:import-dropped', (event, paths) => {
+  if (!Array.isArray(paths)) return [];
+  return importPaths(event, paths.filter((entry) => typeof entry === 'string' && entry));
 });
 
 // ---------------------------------------------------------------------------

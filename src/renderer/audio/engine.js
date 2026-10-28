@@ -120,7 +120,7 @@ class Player {
 
   // --- Queue --------------------------------------------------------------
 
-  /** Append tracks: { url, title, gainDb? }. Indices of existing tracks don't change. */
+  /** Append tracks: { url, title, gainDb?, ... }. Indices of existing tracks don't change. */
   addTracks(tracks) {
     const queue = [...this.#state.queue, ...tracks];
     this.#set({ queue, status: this.#state.status === 'empty' && queue.length ? 'stopped' : this.#state.status });
@@ -361,7 +361,32 @@ class Player {
 
   #updateMediaSession(track) {
     if (!('mediaSession' in navigator)) return;
-    navigator.mediaSession.metadata = new MediaMetadata({ title: track.title });
+    const metadata = new MediaMetadata({
+      title: track.title,
+      artist: track.artist ?? '',
+      album: track.album ?? '',
+    });
+    navigator.mediaSession.metadata = metadata;
+    if (track.artUrl) this.#attachArtwork(metadata, track.artUrl);
+  }
+
+  #artworkObjectUrl = null;
+
+  /**
+   * MediaSession only accepts http/https/data/blob artwork, so re-serve the
+   * cached art as a blob URL. Async: the overlay gets art a moment later.
+   */
+  async #attachArtwork(metadata, artUrl) {
+    try {
+      const blob = await (await fetch(artUrl)).blob();
+      // A newer track may have started while this was fetching.
+      if (navigator.mediaSession.metadata !== metadata) return;
+      if (this.#artworkObjectUrl) URL.revokeObjectURL(this.#artworkObjectUrl);
+      this.#artworkObjectUrl = URL.createObjectURL(blob);
+      metadata.artwork = [{ src: this.#artworkObjectUrl, type: blob.type }];
+    } catch {
+      // No overlay art is fine; the app's own art pane is unaffected.
+    }
   }
 }
 

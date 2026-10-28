@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 /**
  * The only bridge between the renderer and Node. Everything the UI can ask the
@@ -26,7 +26,22 @@ contextBridge.exposeInMainWorld('beachday', {
     getInfo: () => ipcRenderer.invoke('app:get-info'),
   },
 
-  dialog: {
-    openAudioFiles: () => ipcRenderer.invoke('dialog:open-audio-files'),
+  tracks: {
+    pickFiles: () => ipcRenderer.invoke('tracks:pick-files'),
+    pickFolder: () => ipcRenderer.invoke('tracks:pick-folder'),
+    /**
+     * Takes an array of File objects from a drop event (not the FileList —
+     * contextBridge can't pass one). Only real dropped files have paths.
+     */
+    importDropped: (files) =>
+      ipcRenderer.invoke(
+        'tracks:import-dropped',
+        Array.from(files, (file) => webUtils.getPathForFile(file))
+      ),
+    onImportProgress: (callback) => {
+      const listener = (_event, progress) => callback(progress);
+      ipcRenderer.on('tracks:import-progress', listener);
+      return () => ipcRenderer.removeListener('tracks:import-progress', listener);
+    },
   },
 });

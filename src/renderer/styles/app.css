@@ -142,7 +142,7 @@ button {
 .pane--art {
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  /* No padding: art runs to the pane's edges on whichever axis it reaches. */
   background: var(--bg);
 }
 
@@ -154,6 +154,7 @@ button {
 
 .placeholder {
   display: flex;
+  margin: 20px;
   flex-direction: column;
   align-items: center;
   gap: 14px;
@@ -173,94 +174,147 @@ button {
   color: var(--text-muted);
 }
 
-.placeholder__phase {
-  font-size: 12px;
-  color: var(--text-muted);
+/* --------------------------------------------------------------------------
+   Art pane
+   -------------------------------------------------------------------------- */
+
+.art {
+  /* Letterbox, never crop (PLAN.md §5 "Art pane"). */
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 /* --------------------------------------------------------------------------
-   Phase 2 test queue (replaced by the track list in Phase 3)
+   Track list (Phase 3 flat list; Phase 5 virtualizes and groups it)
    -------------------------------------------------------------------------- */
 
-.testqueue {
-  padding: 18px 20px;
+.tracklist {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
 }
 
-.testqueue__header {
+.tracklist--dragover {
+  outline: 2px dashed var(--highlight);
+  outline-offset: -6px;
+}
+
+.tracklist__header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 14px;
-}
-
-.testqueue__heading {
-  margin: 0 0 4px;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.testqueue__note {
-  margin: 0;
-  font-size: 12.5px;
-  color: var(--text-muted);
-}
-
-.button {
-  flex-shrink: 0;
-  padding: 7px 14px;
-  border-radius: 6px;
-  background: var(--accent);
-  color: var(--accent-contrast);
-  font-size: 13px;
-  font-weight: 600;
-  transition: background var(--fast) var(--ease);
-}
-
-.button:hover {
-  background: var(--accent-hover);
-}
-
-.testqueue__list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.testqueue__track {
-  display: flex;
   gap: 12px;
-  padding: 3px 8px;
-  border-left: 3px solid transparent;
-  font-size: 13px;
+  padding: 8px 12px 8px 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.tracklist__totals {
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
 }
 
-.testqueue__track:hover {
+.tracklist__actions {
+  display: flex;
+  gap: 4px;
+}
+
+.tracklist__action {
+  padding: 3px 9px;
+  border-radius: 4px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+.tracklist__action:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.tracklist__action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.tracklist__empty {
+  display: grid;
+  flex: 1;
+  place-content: center;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.tracklist__empty p {
+  margin: 0;
+}
+
+.tracklist__empty-hint {
+  margin-top: 6px !important;
+  font-size: 12px;
+}
+
+.tracklist__rows {
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+}
+
+.track {
+  display: grid;
+  grid-template-columns: 3ch minmax(0, 3fr) minmax(0, 2fr) 5ch;
+  gap: 12px;
+  align-items: baseline;
+  padding: 2px 12px 2px 17px;
+  border-left: 3px solid transparent;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--text-secondary);
+}
+
+.track:nth-child(even) {
+  background: color-mix(in srgb, var(--surface-raised) 45%, transparent);
+}
+
+.track:hover {
   background: var(--surface-hover);
 }
 
-.testqueue__track--current {
+.track--current,
+.track--current:nth-child(even) {
   border-left-color: var(--highlight);
   background: var(--surface-raised);
   color: var(--text-primary);
 }
 
-.testqueue__number {
-  min-width: 2ch;
-  text-align: right;
+.track__number,
+.track__duration {
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
+  text-align: right;
   color: var(--text-muted);
 }
 
-.testqueue__title {
-  min-width: 0;
+.track--current .track__number,
+.track--current .track__duration {
+  color: var(--text-primary);
+}
+
+.track__title,
+.track__artist {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.track__artist {
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 /* --------------------------------------------------------------------------
@@ -291,6 +345,11 @@ button {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 14px;
+}
+
+.transport__album {
+  margin-right: 10px;
+  color: var(--highlight);
 }
 
 .transport__title {

@@ -2,7 +2,7 @@
 
 Audio player and playlist curation tool for local music files. Linux + Windows.
 
-**Status:** Phases 1–2 complete; Phase 3 next.
+**Status:** Phases 1–3 complete; Phase 4 next.
 **Last updated:** 2026-10-28
 
 ---
@@ -306,7 +306,9 @@ annoying in real use.
 ### Art pane
 
 Target 1/2–2/3 of window width, user-resizable via a draggable split. Letterbox rather than
-crop — cover art aspect ratios vary and cropping loses information.
+crop — cover art aspect ratios vary and cropping loses information. **No padding:** art is as
+large as the pane allows, touching its edges on whichever axis it fills, and is never
+stretched or cropped (decided 2026-10-28).
 
 **GIF guardrail:** Chromium caches decoded GIF frames, so a 1920×1080 / 200-frame GIF can exceed
 1GB of decoded bitmap. At import, check `width × height × frameCount` against a threshold and
@@ -369,8 +371,8 @@ should land while the codebase is small.
 |---|---|---|---|
 | 1 | **Foundations** — **DONE** | Electron shell runs on Linux; main↔renderer IPC working; `electron-builder` produces a Windows zip; custom window chrome | — |
 | 2 | **Audio engine** — **DONE** | mp3/flac/wav play; seek, volume, play/pause/stop/next/prev; sequential order; transport bar; **dual-element preload** (§5) | Low |
-| 3 | **Metadata + import** | Folder/file import reads tags and embedded art; art cached to disk; tracks render in a flat list | Low–Med |
-| 4 | **Playlist format** | `.bday` saves and loads in both modes; **relink flow works across a simulated Linux→Windows path change**; multi-playlist store with per-playlist undo history (§5) | **High** |
+| 3 | **Metadata + import** — **DONE** | Folder/file import reads tags and embedded art; art cached to disk; tracks render in a flat list | Low–Med |
+| 4 | **Playlist format** | `.bday` saves and loads in both modes; **relink flow works across a simulated Linux→Windows path change**; multi-playlist store with per-playlist undo history (§5); **menu system** built from the `MENUS.md` table | **High** |
 | 5 | **Track list** | Virtualized flat list → group headers → collapse → drag-reorder → multi-select, smooth at 5,000 tracks; playlist tab strip with session restore (§5) | **High** |
 | 6 | **Art pane** | Large art with resizable split; GIF support with import guardrail; art resolution chain | Med |
 | 7 | **Playlist-side metadata** | Per-track rename / custom art / dB; playlist name, description, author, cover; subgroup editor | Med |
@@ -457,7 +459,7 @@ electron-builder 26.18.0. `npm audit` clean.
 - **A packaged Electron app swallows stdout/stderr.** `console.log` from the main process is
   invisible once packaged. To debug a packaged build, run its app directory through the dev
   Electron binary:
-  `./node_modules/electron/dist/electron ./release/linux-unpacked/resources/app`
+  `./node_modules/electron/dist/electron ./release/linux-unpacked/resources/app.asar`
   That surfaces the real error.
 - **`ELECTRON_RUN_AS_NODE=1` makes the binary behave as plain Node** — no Chromium, and
   `require('electron')` returns a path string instead of the API, which produces confusing
@@ -511,4 +513,37 @@ element state.
   Each deck load bumps a `loadId`; async results compare against it.
 - **MP3 encoder padding** (§5) is still present — the MP3 seam is real but small. Unchanged
   decision: FLAC for transitions that must be seamless.
+
+---
+
+## 11. Phase 3 — Complete (2026-10-28)
+
+- **Import** three ways: Add files, Add folder (recursive; hidden entries and symlinked folders
+  skipped) and drag-and-drop of files or folders onto the list. Paths are resolved and
+  de-duplicated within one import. Tracks are ordered by folder → disc → track number → name.
+- **Tags** via `music-metadata`, read-only, 2–9ms per file, 4 in flight. Unreadable tags keep
+  the track under its file name. Format names are normalized (`WAV`, `MP3`, `FLAC`).
+  music-metadata calls 24-bit extensible WAV "non-PCM (65534)".
+- **Embedded art** cached to `userData/art-cache/<sha256>.<ext>`, content-addressed so an
+  album's shared cover is stored once, and served as `beachday-media://art/<name>`.
+- **Flat list** with a totals header (`N tracks | Time: m:ss`), playing-row marker, and
+  double-click to play. The art pane shows the playing track's art, letterboxed. The transport
+  shows album (in `--highlight`) then title, as in the reference skin.
+- **Drops stay unforgeable:** the preload resolves paths from `File` objects with
+  `webUtils.getPathForFile`, which page code can't fake, so main still reaches only files the
+  user chose.
+- Verified in a harness against the test tracks, including a CDP-simulated OS folder drop and
+  screenshots via `capturePage()`. A packaged build (`electron-builder --linux dir`) contains
+  only our source plus music-metadata's 13 packages, and launches cleanly.
+
+### Carried forward
+
+- **ReplayGain is read, not applied.** `replayGainDb` is on every track that has it (the test
+  FLAC and MP3 do: −6.9dB, −4.3dB). Whether it seeds per-track gain is decided in Phase 7.
+  Applying it changes loudness the user has already approved. Per-track gain itself is
+  confirmed core scope (concept brief; `overrides.gainDb`; Phase 7).
+- **Art cache has no eviction.** It only grows. Cheap to add a sweep later (delete entries no
+  open playlist references); not urgent at album-art sizes.
+- **The menu system is built in Phase 4** (decided 2026-10-28), alongside the first real File
+  items (New/Open/Save). The Add buttons in the list header move into File then.
 
