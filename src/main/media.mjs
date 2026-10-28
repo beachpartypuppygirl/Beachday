@@ -10,13 +10,17 @@ import { resolveArtPath, ART_CONTENT_TYPES } from './art.mjs';
  * The beachday-media:// protocol: how the renderer reaches local files
  * without having filesystem access of its own.
  *
- *   beachday-media://track/<token>   an audio file the user has chosen
+ *   beachday-media://track/<token>   audio the user has chosen: a file, or a
+ *                                    byte range inside a bundled .bday
  *   beachday-media://art/<name>      an image in the art cache (art.mjs)
  *
- * Main hands out an opaque URL per audio file the user has chosen, and the
- * handler serves only those. The
- * renderer can't construct a URL for an arbitrary path, and Windows paths
- * (drive letters, backslashes) never have to survive URL encoding.
+ * Main hands out an opaque URL per audio source, and the handler serves only
+ * those. The renderer can't construct a URL for an arbitrary path, and Windows
+ * paths (drive letters, backslashes) never have to survive URL encoding.
+ *
+ * A source is { path, offset?, size?, name? }. offset/size select a stored
+ * entry inside a .bday (bday.mjs); name supplies the extension for the
+ * content type when path is the .bday itself.
  *
  * Range requests are required, not optional: Chromium's media pipeline
  * seeks by requesting byte ranges, and without 206 responses seeking breaks.
@@ -34,10 +38,13 @@ const MIME_TYPES = {
   '.aac': 'audio/aac',
 };
 
-/** token -> absolute path */
-const pathsByToken = new Map();
-/** absolute path -> token, so granting the same file twice yields one URL */
-const tokensByPath = new Map();
+/** token -> source */
+const sourcesByToken = new Map();
+/** source key -> token, so granting the same source twice yields one URL */
+const tokensByKey = new Map();
+
+const sourceKey = ({ path: filePath, offset = 0 }) => `${filePath}\0${offset}`;
+const tokenOf = (url) => url?.startsWith(`${MEDIA_SCHEME}://track/`) ? url.slice(`${MEDIA_SCHEME}://track/`.length) : null;
 
 /** Must run before app 'ready' — Electron rejects privileged schemes after it. */
 export function registerMediaScheme() {
@@ -58,15 +65,35 @@ export function registerMediaScheme() {
   ]);
 }
 
-/** Allow the renderer to play `filePath`, returning the URL to use for it. */
-export function grantMediaUrl(filePath) {
-  let token = tokensByPath.get(filePath);
+/** Allow the renderer to play `source`, returning the URL to use for it. */
+export function grantMediaSource(source) {
+  const key = sourceKey(source);
+  let token = tokensByKey.get(key);
   if (!token) {
     token = randomBytes(12).toString('hex');
-    tokensByPath.set(filePath, token);
-    pathsByToken.set(token, filePath);
+    tokensByKey.set(key, token);
+    sourcesByToken.set(token, source);
   }
   return `${MEDIA_SCHEME}://track/${token}`;
+}
+
+/** The source behind a URL this module granted, or null. Main uses it to save. */
+export function sourceForUrl(url) {
+  return sourcesByToken.get(tokenOf(url)) ?? null;
+}
+
+/**
+ * Point an existing URL at a new source. Used after re-saving a bundled
+ * .bday: entry offsets change, but an <audio> element mid-playback keeps
+ * requesting ranges from the URL it already has.
+ */
+export function repointMediaUrl(url, source) {
+  const token = tokenOf(url);
+  const previous = sourcesByToken.get(token);
+  if (!previous) return;
+  tokensByKey.delete(sourceKey(previous));
+  tokensByKey.set(sourceKey(source), token);
+  sourcesByToken.set(token, source);
 }
 
 /** URL for an art cache entry returned by cacheArt(). */
@@ -81,24 +108,30 @@ export function handleMediaProtocol() {
     const name = pathname.slice(1);
 
     if (hostname === 'track') {
-      const filePath = pathsByToken.get(name);
-      const extension = filePath && path.extname(filePath).toLowerCase();
-      return serveFile(request, filePath, MIME_TYPES[extension]);
+      const source = sourcesByToken.get(name);
+      const extension = source && path.extname(source.name ?? source.path).toLowerCase();
+      return serveFile(request, source, MIME_TYPES[extension]);
     }
     if (hostname === 'art') {
       const filePath = resolveArtPath(name);
-      return serveFile(request, filePath, filePath && ART_CONTENT_TYPES[path.extname(filePath).slice(1)]);
+      return serveFile(
+        request,
+        filePath && { path: filePath },
+        filePath && ART_CONTENT_TYPES[path.extname(filePath).slice(1)]
+      );
     }
     return new Response(null, { status: 404 });
   });
 }
 
-async function serveFile(request, filePath, contentType) {
-  if (!filePath) return new Response(null, { status: 404 });
+async function serveFile(request, source, contentType) {
+  if (!source) return new Response(null, { status: 404 });
+  const { path: filePath, offset = 0 } = source;
 
-  let size;
+  let size = source.size;
   try {
-    size = (await stat(filePath)).size;
+    const info = await stat(filePath);
+    size ??= info.size;
   } catch {
     return new Response(null, { status: 404 });
   }
@@ -120,7 +153,9 @@ async function serveFile(request, filePath, contentType) {
   }
 
   const { start, end } = range ?? { start: 0, end: size - 1 };
-  const body = Readable.toWeb(fs.createReadStream(filePath, { start, end }));
+  const body = Readable.toWeb(
+    fs.createReadStream(filePath, { start: offset + start, end: offset + end })
+  );
   return new Response(body, {
     status: range ? 206 : 200,
     headers: {

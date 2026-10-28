@@ -30,6 +30,8 @@
     "wait-on": "^8.0.2"
   },
   "dependencies": {
-    "music-metadata": "^12.3.2"
+    "music-metadata": "^12.3.2",
+    "yauzl": "^3.4.0",
+    "yazl": "^3.3.1"
   }
 }

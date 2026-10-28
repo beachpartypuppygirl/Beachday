@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { player } from '../audio/engine.js';
 import { usePlayer, usePlaybackPosition } from '../audio/usePlayer.js';
 import { formatTime } from '../format.js';
+import { runCommand } from '../menus/commands.js';
 
 const SEEK_STEP_S = 5;
 
@@ -16,19 +17,6 @@ export default function Transport() {
   const { queue, index, status, duration, volume, muted, error } = usePlayer();
   const track = queue[index];
   const isPlaying = status === 'playing';
-
-  // Space toggles playback, unless a control has focus — a focused button
-  // already activates on Space, and toggling here too would cancel it out.
-  useEffect(() => {
-    const onKeyDown = (event) => {
-      if (event.code !== 'Space' || event.repeat) return;
-      if (event.target.closest('button, input, textarea, [role="slider"]')) return;
-      event.preventDefault();
-      player.togglePlay();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
 
   return (
     <footer className="transport">
@@ -55,7 +43,7 @@ export default function Transport() {
           <TransportButton
             label={isPlaying ? 'Pause' : 'Play'}
             large
-            onClick={() => player.togglePlay()}
+            onClick={() => runCommand('playback.playPause')}
           >
             {isPlaying ? <path d="M3.5 2h2.4v10H3.5zM8.1 2h2.4v10H8.1z" /> : <path d="M4 1.8v10.4L12 7z" />}
           </TransportButton>

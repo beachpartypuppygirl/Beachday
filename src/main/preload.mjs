@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import { contextBridge, ipcRenderer, webUtils, webFrame } from 'electron';
 
 /**
  * The only bridge between the renderer and Node. Everything the UI can ask the
@@ -9,6 +9,13 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
  * Subscription helpers return an unsubscribe function so they drop straight
  * into a React useEffect cleanup.
  */
+/** Listen on a main -> renderer channel; returns the unsubscribe function. */
+function subscribe(channel, callback) {
+  const listener = (_event, payload) => callback(payload);
+  ipcRenderer.on(channel, listener);
+  return () => ipcRenderer.removeListener(channel, listener);
+}
+
 contextBridge.exposeInMainWorld('beachday', {
   window: {
     minimize: () => ipcRenderer.invoke('window:minimize'),
@@ -24,6 +31,37 @@ contextBridge.exposeInMainWorld('beachday', {
 
   app: {
     getInfo: () => ipcRenderer.invoke('app:get-info'),
+    /** Main asks before the window closes; answer with confirmClose() when it's safe. */
+    onCloseRequested: (callback) => subscribe('app:close-requested', callback),
+    confirmClose: () => ipcRenderer.invoke('app:confirm-close'),
+  },
+
+  playlist: {
+    open: () => ipcRenderer.invoke('playlist:open'),
+    openRecent: (filePath) => ipcRenderer.invoke('playlist:open-recent', filePath),
+    recent: () => ipcRenderer.invoke('playlist:recent'),
+    save: (request) => ipcRenderer.invoke('playlist:save', request),
+    onSaveProgress: (callback) => subscribe('playlist:save-progress', callback),
+    resolve: (request) => ipcRenderer.invoke('playlist:resolve', request),
+    locate: (request) => ipcRenderer.invoke('playlist:locate', request),
+  },
+
+  config: {
+    getFolderMappings: () => ipcRenderer.invoke('config:get-mappings'),
+    setFolderMappings: (mappings) => ipcRenderer.invoke('config:set-mappings', mappings),
+  },
+
+  dialog: {
+    pickFolder: (title) => ipcRenderer.invoke('dialog:pick-folder', title),
+    /** Resolves 'save' | 'discard' | 'cancel'. */
+    confirmUnsaved: (name) => ipcRenderer.invoke('dialog:confirm-unsaved', name),
+  },
+
+  view: {
+    // Half-steps, matching Chromium's own zoom increments closely enough.
+    zoomIn: () => webFrame.setZoomLevel(Math.min(webFrame.getZoomLevel() + 0.5, 4)),
+    zoomOut: () => webFrame.setZoomLevel(Math.max(webFrame.getZoomLevel() - 0.5, -3)),
+    resetZoom: () => webFrame.setZoomLevel(0),
   },
 
   tracks: {
@@ -38,10 +76,6 @@ contextBridge.exposeInMainWorld('beachday', {
         'tracks:import-dropped',
         Array.from(files, (file) => webUtils.getPathForFile(file))
       ),
-    onImportProgress: (callback) => {
-      const listener = (_event, progress) => callback(progress);
-      ipcRenderer.on('tracks:import-progress', listener);
-      return () => ipcRenderer.removeListener('tracks:import-progress', listener);
-    },
+    onImportProgress: (callback) => subscribe('tracks:import-progress', callback),
   },
 });

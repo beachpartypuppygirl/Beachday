@@ -1,24 +1,25 @@
-import { parseFile } from 'music-metadata';
+import { parseFile, parseStream } from 'music-metadata';
+import fs from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { grantMediaUrl, artUrl } from './media.mjs';
-import { cacheArt, chooseCover } from './art.mjs';
+import { randomBytes } from 'node:crypto';
+import { grantMediaSource, artUrl } from './media.mjs';
+import { cacheArt, chooseCover, artExists } from './art.mjs';
+import { fingerprint } from './fingerprint.mjs';
+import { isAudioFile } from './audioFiles.mjs';
+
+export { AUDIO_EXTENSIONS } from './audioFiles.mjs';
 
 /**
  * Track import: find audio files, read their tags (read-only — Beachday never
  * writes tags), cache embedded art, and return plain track objects.
  */
 
-export const AUDIO_EXTENSIONS = ['mp3', 'flac', 'wav', 'ogg', 'opus', 'm4a', 'aac'];
-
 // Tag parsing is I/O-bound; a few in flight at once keeps a large folder
 // import fast without opening hundreds of file handles.
 const PARSE_CONCURRENCY = 4;
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
-
-const isAudioFile = (filePath) =>
-  AUDIO_EXTENSIONS.includes(path.extname(filePath).slice(1).toLowerCase());
 
 /**
  * Expand files and folders into a flat list of audio file paths. Folders are
@@ -56,38 +57,80 @@ async function walk(dir, found) {
 }
 
 /**
- * Read tracks for `filePaths`, reporting progress as (done, total).
+ * Import `filePaths` as playlist entries, reporting progress as (done, total).
  * Returned in album order: by folder, then disc, then track number, then name.
+ *
+ * Each result is { track, resolution }:
+ *   track       what a .bday stores — id, where the audio was (absPath; relPath
+ *               is computed at save time), size + fingerprint for relinking,
+ *               and a snapshot of its tags, so a playlist shows titles and
+ *               totals even before (or without) finding the audio.
+ *   resolution  this session only — the playable URL and art URL.
  */
-export async function readTracks(filePaths, onProgress = () => {}) {
-  const tracks = new Array(filePaths.length);
+export async function importTracks(filePaths, onProgress = () => {}) {
+  const items = new Array(filePaths.length);
   let next = 0;
   let done = 0;
 
   const worker = async () => {
     while (next < filePaths.length) {
       const i = next++;
-      tracks[i] = await readTrack(filePaths[i]);
+      items[i] = await importTrack(filePaths[i]);
       onProgress(++done, filePaths.length);
     }
   };
   await Promise.all(Array.from({ length: Math.min(PARSE_CONCURRENCY, filePaths.length) }, worker));
 
-  return tracks.sort(
-    (a, b) =>
-      collator.compare(path.dirname(a.path), path.dirname(b.path)) ||
-      (a.discNo ?? 0) - (b.discNo ?? 0) ||
-      (a.trackNo ?? 0) - (b.trackNo ?? 0) ||
-      collator.compare(path.basename(a.path), path.basename(b.path))
+  return items.filter(Boolean).sort(
+    ({ track: a }, { track: b }) =>
+      collator.compare(path.dirname(a.absPath), path.dirname(b.absPath)) ||
+      (a.tags.discNo ?? 0) - (b.tags.discNo ?? 0) ||
+      (a.tags.trackNo ?? 0) - (b.tags.trackNo ?? 0) ||
+      collator.compare(path.basename(a.absPath), path.basename(b.absPath))
   );
 }
 
-async function readTrack(filePath) {
-  const track = {
-    path: filePath,
-    url: grantMediaUrl(filePath),
-    // The file name stands in for a title until tags say otherwise.
-    title: path.parse(filePath).name,
+export const newTrackId = () => `t_${randomBytes(6).toString('hex')}`;
+
+async function importTrack(filePath) {
+  let size;
+  try {
+    ({ size } = await stat(filePath));
+  } catch {
+    return null; // Vanished between listing and reading.
+  }
+  const source = { path: filePath, size };
+  const [tags, print] = await Promise.all([readTags(source), fingerprint(source).catch(() => null)]);
+  return {
+    track: {
+      id: newTrackId(),
+      absPath: filePath,
+      relPath: null,
+      size,
+      fingerprint: print,
+      tags,
+      // Playlist-side metadata (Phase 7): title, art, gainDb overrides.
+      overrides: {},
+      groupId: null,
+      linkNext: null,
+    },
+    resolution: {
+      status: 'ok',
+      url: grantMediaSource(source),
+      artUrl: tags.artName ? artUrl(tags.artName) : null,
+    },
+  };
+}
+
+/**
+ * Read tags from a file, or from a stored entry inside a .bday
+ * (source.offset set; source.name gives the entry's file name). Never throws:
+ * unreadable tags leave the file name standing in for a title.
+ */
+export async function readTags(source) {
+  const fileName = source.name ?? source.path;
+  const tags = {
+    title: path.parse(fileName).name,
     artist: null,
     albumArtist: null,
     album: null,
@@ -96,22 +139,30 @@ async function readTrack(filePath) {
     year: null,
     genre: null,
     duration: null,
-    codec: codecLabel(null, filePath),
+    codec: codecLabel(null, fileName),
     lossless: null,
     sampleRate: null,
     bitsPerSample: null,
     bitrate: null,
-    // Read, not applied: whether ReplayGain seeds per-track gain is a Phase 7 decision.
+    // Phase 7 seeds overrides.gainDb from this when a track is added (PLAN.md §11).
     replayGainDb: null,
-    artUrl: null,
-    metadataError: null,
+    // Art cache entry name (art.mjs). Recreated from the audio on machines that lack it.
+    artName: null,
   };
 
   try {
-    const { common, format } = await parseFile(filePath);
-    const cover = await cacheArt(chooseCover(common.picture)).catch(() => null);
-    Object.assign(track, {
-      title: common.title?.trim() || track.title,
+    const { common, format } =
+      source.offset == null
+        ? await parseFile(source.path)
+        : await parseStream(
+            fs.createReadStream(source.path, {
+              start: source.offset,
+              end: source.offset + source.size - 1,
+            }),
+            { path: fileName, size: source.size }
+          );
+    Object.assign(tags, {
+      title: common.title?.trim() || tags.title,
       artist: common.artist ?? null,
       albumArtist: common.albumartist ?? null,
       album: common.album ?? null,
@@ -120,19 +171,31 @@ async function readTrack(filePath) {
       year: common.year ?? null,
       genre: common.genre?.[0] ?? null,
       duration: Number.isFinite(format.duration) ? format.duration : null,
-      codec: codecLabel(format, filePath),
+      codec: codecLabel(format, fileName),
       lossless: format.container === 'WAVE' ? true : (format.lossless ?? null),
       sampleRate: format.sampleRate ?? null,
       bitsPerSample: format.bitsPerSample ?? null,
       bitrate: format.bitrate ? Math.round(format.bitrate / 1000) : null,
       replayGainDb: common.replaygain_track_gain?.dB ?? null,
-      artUrl: cover ? artUrl(cover) : null,
+      artName: await cacheArt(chooseCover(common.picture)).catch(() => null),
     });
-  } catch (error) {
-    // Unreadable tags don't make a track unplayable; keep it with its file name.
-    track.metadataError = error.message;
+  } catch {
+    // Keep the defaults.
   }
-  return track;
+  return tags;
+}
+
+/**
+ * Art URL for a loaded track. The art cache is per machine, so a playlist
+ * from elsewhere names art this machine has never seen: re-extract it from
+ * the audio when the audio is available.
+ */
+export async function ensureArt(artName, source) {
+  if (!artName) return null;
+  if (await artExists(artName)) return artUrl(artName);
+  if (!source) return null;
+  const tags = await readTags(source);
+  return tags.artName ? artUrl(tags.artName) : null;
 }
 
 /**

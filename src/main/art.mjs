@@ -1,6 +1,6 @@
 import { app } from 'electron';
 import { createHash } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 /**
@@ -62,4 +62,15 @@ export async function cacheArt(picture) {
 /** Map a cache name from a URL back to a path, rejecting anything that isn't one. */
 export function resolveArtPath(name) {
   return NAME_PATTERN.test(name) ? path.join(cacheDir(), name) : null;
+}
+
+export async function artExists(name) {
+  const filePath = resolveArtPath(name);
+  if (!filePath) return false;
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
 }

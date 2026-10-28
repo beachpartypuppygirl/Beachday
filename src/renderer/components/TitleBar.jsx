@@ -1,15 +1,12 @@
 import { useEffect, useState } from 'react';
-
-// The agreed bar — see MENUS.md for what each menu holds.
-const MENUS = ['File', 'Edit', 'View', 'Playback', 'Playlist', 'Track', 'Options', 'Help'];
+import MenuBar from './MenuBar.jsx';
 
 /**
  * Custom window chrome. The BrowserWindow is frameless, so this bar provides
  * both the drag region (-webkit-app-region: drag in app.css) and the
  * minimize / maximize / close controls.
  *
- * The menu items are inert until the menu system is built — they mark where
- * the real menus land.
+ * The menus themselves are MenuBar.jsx, built from menus/commands.js.
  */
 export default function TitleBar() {
   const [isMaximized, setIsMaximized] = useState(false);
@@ -25,13 +22,7 @@ export default function TitleBar() {
     <header className="titlebar">
       <span className="titlebar__brand">BEACHDAY</span>
 
-      <nav className="titlebar__menu">
-        {MENUS.map((label) => (
-          <button key={label} className="titlebar__menu-item" type="button">
-            {label}
-          </button>
-        ))}
-      </nav>
+      <MenuBar />
 
       <div className="titlebar__spacer" />
 

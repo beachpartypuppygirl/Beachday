@@ -183,8 +183,11 @@ Designed in `PLAN.md` §5 (2026-10-28). Menu effects:
 
 ## Implementation notes
 
-The menu system is built in **Phase 4**. Until then the bar's labels are inert, and the list
-header's Add files/folder buttons stand in for File ▸ Add.
+**Built in Phase 4** from the table in `src/renderer/menus/commands.js`. Live now: all of File,
+Edit ▸ Undo/Redo, View ▸ Zoom, Playback (except Order/Repeat/Reshuffle/Stop After Current),
+Playlist ▸ Storage and Relink, Options ▸ Folder Mappings, Help ▸ Keyboard Shortcuts and About.
+**Track** shows dimmed and doesn't open: every Track item acts on the selection, which arrives
+in Phase 5. The empty playlist view keeps Add files/folder buttons as a convenience.
 
 - The window is frameless, so these are **React dropdowns**, not a native `Menu`. Define every
   menu from **one data structure** (`id`, `label`, `shortcut`, `enabledWhen`, `action`) so that
@@ -192,7 +195,8 @@ header's Add files/folder buttons stand in for File ▸ Add.
   the Track right-click menu read from the same source.
 - Keyboard shortcuts are handled in the renderer from that same table. Media keys
   (play/pause/next/prev) come through `navigator.mediaSession` in the audio engine (Phase 2).
-- Phase 2 binds Space to play/pause directly in `Transport.jsx`; move it into the table when
-  the menus are built.
+- Space (play/pause) is in the table; it's ignored while a button or slider has focus, since
+  those already react to Space. All shortcuts are ignored while typing in a field or while a
+  dialog is open.
 - Items whose phase hasn't landed are **hidden, not disabled**, so the menus never advertise
   features that don't exist yet.

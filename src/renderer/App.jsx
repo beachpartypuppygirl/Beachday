@@ -1,7 +1,11 @@
+import { useEffect } from 'react';
 import TitleBar from './components/TitleBar.jsx';
 import TrackList from './components/TrackList.jsx';
 import Transport from './components/Transport.jsx';
+import Dialogs from './components/Dialogs.jsx';
 import { usePlayer } from './audio/usePlayer.js';
+import { handleShortcut, runCommand } from './menus/commands.js';
+import { requestAppClose } from './store/actions.js';
 
 /**
  * App shell. The layout mirrors PLAN.md §1: a large art pane on the left
@@ -12,12 +16,24 @@ import { usePlayer } from './audio/usePlayer.js';
  * adds the draggable split, GIF guardrail and the full art resolution chain.
  */
 export default function App() {
+  useEffect(() => {
+    window.addEventListener('keydown', handleShortcut);
+    return () => window.removeEventListener('keydown', handleShortcut);
+  }, []);
+
+  // Main asks before the window closes, so unsaved playlists can be settled.
+  useEffect(() => window.beachday.app.onCloseRequested(requestAppClose), []);
+
   return (
     <div className="app">
       <TitleBar />
 
       <main className="workspace">
-        <section className="pane pane--art">
+        {/* Left-click anywhere on the art toggles playback, as in foobar2000. */}
+        <section
+          className="pane pane--art"
+          onClick={(event) => event.button === 0 && runCommand('playback.playPause')}
+        >
           <ArtPane />
         </section>
 
@@ -27,6 +43,7 @@ export default function App() {
       </main>
 
       <Transport />
+      <Dialogs />
     </div>
   );
 }

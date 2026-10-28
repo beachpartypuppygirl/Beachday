@@ -1,34 +1,38 @@
-import { useEffect, useState } from 'react';
-import { player } from '../audio/engine.js';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { usePlayer } from '../audio/usePlayer.js';
+import * as store from '../store/playlists.js';
+import * as ui from '../store/ui.js';
+import * as actions from '../store/actions.js';
 import { formatTime } from '../format.js';
 
 /**
- * Phase 3 flat track list. Phase 5 replaces the rendering with a virtualized
- * list (group headers, collapse, drag-reorder, multi-select); the header's
- * totals line and the row content carry over.
- *
- * The Add buttons are stand-ins for File ▸ Add Files / Add Folder (MENUS.md)
- * until the menu bar is built.
+ * The viewed playlist as a flat list. Phase 5 replaces the rendering with a
+ * virtualized list (group headers, collapse, drag-reorder, multi-select) and
+ * adds the tab strip above the header; the header and row content carry over.
  */
 export default function TrackList() {
+  const { playlists, viewedId, playingId } = useSyncExternalStore(store.subscribe, store.getState);
   const { queue, index, status } = usePlayer();
-  const [progress, setProgress] = useState(null);
+  const { busy, notice } = ui.useUi();
+  const [importProgress, setImportProgress] = useState(null);
   const [isDragOver, setIsDragOver] = useState(false);
 
-  useEffect(() => window.beachday.tracks.onImportProgress(setProgress), []);
+  const playlist = playlists[viewedId];
 
-  async function runImport(request) {
-    try {
-      const tracks = await request();
-      player.addTracks(tracks.map((track) => ({ ...track, id: crypto.randomUUID() })));
-    } catch (error) {
-      // Per-file failures are already absorbed in main; this is the whole request failing.
-      console.error('Import failed', error);
-    } finally {
-      setProgress(null);
-    }
-  }
+  useEffect(
+    () =>
+      window.beachday.tracks.onImportProgress((progress) =>
+        setImportProgress(progress.done < progress.total ? progress : null)
+      ),
+    []
+  );
+
+  if (!playlist) return null;
+
+  const tracks = playlist.doc.tracks.map((track) => store.trackView(track, playlist.resolution));
+  const playingTrackId = playingId === viewedId && status !== 'empty' ? queue[index]?.id : null;
+  const totalDuration = tracks.reduce((sum, track) => sum + (track.duration ?? 0), 0);
+  const missing = tracks.filter((track) => track.missing).length;
 
   const onDragOver = (event) => {
     if (!event.dataTransfer.types.includes('Files')) return;
@@ -43,10 +47,12 @@ export default function TrackList() {
     // An array, not the FileList: contextBridge passes File objects but turns a
     // FileList into an empty object.
     const files = [...event.dataTransfer.files];
-    if (files.length) runImport(() => window.beachday.tracks.importDropped(files));
+    if (files.length) actions.importInto(() => window.beachday.tracks.importDropped(files));
   };
 
-  const totalDuration = queue.reduce((sum, track) => sum + (track.duration ?? 0), 0);
+  let statusLine = `${tracks.length} ${tracks.length === 1 ? 'track' : 'tracks'} | Time: ${formatTime(totalDuration)}`;
+  if (importProgress) statusLine = `Reading tags… ${importProgress.done} / ${importProgress.total}`;
+  if (busy) statusLine = `${busy.label}…${busy.fraction != null ? ` ${Math.round(busy.fraction * 100)}%` : ''}`;
 
   return (
     <div
@@ -58,48 +64,53 @@ export default function TrackList() {
       onDrop={onDrop}
     >
       <header className="tracklist__header">
-        <span className="tracklist__totals">
-          {progress
-            ? `Reading tags… ${progress.done} / ${progress.total}`
-            : `${queue.length} ${queue.length === 1 ? 'track' : 'tracks'} | Time: ${formatTime(totalDuration)}`}
-        </span>
-        <div className="tracklist__actions">
-          <button
-            className="tracklist__action"
-            type="button"
-            disabled={Boolean(progress)}
-            onClick={() => runImport(window.beachday.tracks.pickFiles)}
-          >
-            Add files…
-          </button>
-          <button
-            className="tracklist__action"
-            type="button"
-            disabled={Boolean(progress)}
-            onClick={() => runImport(window.beachday.tracks.pickFolder)}
-          >
-            Add folder…
-          </button>
+        <div className="tracklist__heading">
+          <span className="tracklist__name" title={playlist.filePath ?? 'Not saved yet'}>
+            {store.playlistName(playlist)}
+            {store.isDirty(playlist) && (
+              <span className="tracklist__dirty" title="Unsaved changes">
+                {' '}•
+              </span>
+            )}
+          </span>
+          <span className="tracklist__totals">{statusLine}</span>
         </div>
+        {notice ? (
+          <span className="tracklist__notice">{notice}</span>
+        ) : (
+          missing > 0 && (
+            <button className="tracklist__missing" type="button" onClick={() => ui.openDialog('relink')}>
+              {missing} missing · Relink…
+            </button>
+          )
+        )}
       </header>
 
-      {queue.length === 0 && !progress ? (
+      {tracks.length === 0 && !importProgress ? (
         <div className="tracklist__empty">
           <p>Drop audio files or folders here</p>
           <p className="tracklist__empty-hint">mp3 · flac · wav · ogg · opus · m4a</p>
+          <div className="tracklist__empty-actions">
+            <button className="button button--quiet" type="button" onClick={actions.addFiles}>
+              Add files…
+            </button>
+            <button className="button button--quiet" type="button" onClick={actions.addFolder}>
+              Add folder…
+            </button>
+          </div>
         </div>
       ) : (
         <ol className="tracklist__rows">
-          {queue.map((track, i) => (
+          {tracks.map((track, i) => (
             <li
               key={track.id}
-              className={`track${i === index && status !== 'empty' ? ' track--current' : ''}`}
-              title={track.path}
-              onDoubleClick={() => player.playIndex(i)}
+              className={`track${track.id === playingTrackId ? ' track--current' : ''}${track.missing ? ' track--missing' : ''}`}
+              title={track.missing ? `Missing — ${track.path ?? 'unknown location'}` : track.path}
+              onDoubleClick={() => store.play(viewedId, i)}
             >
               <span className="track__number">{i + 1}</span>
               <span className="track__title">{track.title}</span>
-              <span className="track__artist">{track.artist}</span>
+              <span className="track__artist">{track.missing ? 'missing' : track.artist}</span>
               <span className="track__duration">
                 {track.duration != null ? formatTime(track.duration) : ''}
               </span>

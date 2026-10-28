@@ -1,8 +1,10 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, Menu } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerMediaScheme, handleMediaProtocol } from './media.mjs';
-import { AUDIO_EXTENSIONS, collectAudioFiles, readTracks } from './metadata.mjs';
+import { AUDIO_EXTENSIONS, collectAudioFiles, importTracks } from './metadata.mjs';
+import { registerPlaylistIpc } from './playlists.mjs';
+import { loadConfig } from './config.mjs';
 
 // ESM has no __dirname; derive it from import.meta.url.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -16,6 +18,10 @@ const useDevServer = !app.isPackaged && process.env.BEACHDAY_LOAD_DIST !== '1';
 
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
+
+// Closing asks the renderer first, which prompts for unsaved playlists and then
+// confirms (app:confirm-close). This flag lets that confirmed close through.
+let closeConfirmed = false;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -42,6 +48,25 @@ function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+
+  mainWindow.on('close', (event) => {
+    const { webContents } = mainWindow;
+    // A crashed or never-loaded renderer can't answer; don't trap the user.
+    if (closeConfirmed || webContents.isCrashed() || webContents.isLoading()) return;
+    event.preventDefault();
+    webContents.send('app:close-requested');
+  });
+
+  // With the application menu removed (see lifecycle), restore the one
+  // developer shortcut worth having.
+  if (!app.isPackaged) {
+    mainWindow.webContents.on('before-input-event', (event, input) => {
+      if (input.type === 'keyDown' && input.key === 'F12') {
+        mainWindow.webContents.toggleDevTools();
+        event.preventDefault();
+      }
+    });
+  }
 
   // Keep the renderer's maximize/restore button in sync when the window
   // is resized by the OS (double-click titlebar, tiling, keyboard shortcut).
@@ -109,13 +134,13 @@ ipcMain.handle('app:get-info', () => ({
   packaged: app.isPackaged,
 }));
 
-// Import. Each handler resolves to track objects (metadata.mjs), already
-// ordered and with playable URLs granted. Progress goes out as
+// Import. Each handler resolves to { track, resolution } items (metadata.mjs),
+// already ordered and with playable URLs granted. Progress goes out as
 // 'tracks:import-progress' events, so a large folder doesn't look frozen.
 
 async function importPaths(event, paths) {
   const files = await collectAudioFiles(paths);
-  return readTracks(files, (done, total) => {
+  return importTracks(files, (done, total) => {
     if (!event.sender.isDestroyed()) event.sender.send('tracks:import-progress', { done, total });
   });
 }
@@ -148,6 +173,13 @@ ipcMain.handle('tracks:import-dropped', (event, paths) => {
   return importPaths(event, paths.filter((entry) => typeof entry === 'string' && entry));
 });
 
+ipcMain.handle('app:confirm-close', () => {
+  closeConfirmed = true;
+  mainWindow?.close();
+});
+
+registerPlaylistIpc();
+
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
@@ -165,7 +197,11 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    // No native menu: Beachday draws its own (MENUS.md). Electron's default
+    // menu would also claim Ctrl+W and Ctrl+Q, which ours use.
+    Menu.setApplicationMenu(null);
+    await loadConfig(app.getPath('userData'));
     handleMediaProtocol();
     createWindow();
   });

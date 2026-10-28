@@ -2,7 +2,7 @@
 
 Audio player and playlist curation tool for local music files. Linux + Windows.
 
-**Status:** Phases 1–3 complete; Phase 4 next.
+**Status:** Phases 1–4 complete; Phase 5 next.
 **Last updated:** 2026-10-28
 
 ---
@@ -128,6 +128,12 @@ mymix.bday  (zip)
 A `bundled: true|false` flag in the manifest says whether `audio/` is populated. "Convert to
 bundled" and "strip to references" become simple operations on the same file.
 
+**Audio entries are stored, not deflated** (as built in Phase 4). Compressed audio barely
+shrinks, and a stored entry is a plain byte range inside the zip, so a bundled track streams
+and seeks straight out of the `.bday` by offset with no extraction, however large the file.
+The manifest is deflated. A bundled track's `relPath` is its entry name (`audio/<file name>`,
+with ` (2)` on collisions); its fingerprint equals the loose file's.
+
 ### Manifest sketch
 
 ```jsonc
@@ -152,6 +158,11 @@ bundled" and "strip to references" become simple operations on the same file.
       "absPath": "/home/me/Music/pla/04.flac",
       "size": 41203847,
       "fingerprint": "sha256:...",
+      // Snapshot of the file's tags at import (Phase 4). Missing tracks still show titles and
+      // durations, a recipient sees the playlist before relinking, and loading 5,000 tracks
+      // doesn't re-read 5,000 files. artName is an art-cache entry, re-extracted from the
+      // audio on machines that lack it.
+      "tags": { "title": "...", "artist": "...", "album": "...", "duration": 175.0, "replayGainDb": -6.92, "artName": "9f06….jpg" },
       "overrides": { "title": "", "art": "art/track-04.gif", "gainDb": -2.5 },
       "groupId": null,          // explicit pin; overrides derived key
       "linkNext": "t2"          // chain link
@@ -310,6 +321,9 @@ crop — cover art aspect ratios vary and cropping loses information. **No paddi
 large as the pane allows, touching its edges on whichever axis it fills, and is never
 stretched or cropped (decided 2026-10-28).
 
+**Left-click anywhere in the art pane toggles play/pause**, as in foobar2000 (built in Phase 3).
+Right-click is reserved for an art context menu (for example Set Custom Art, Phase 7).
+
 **GIF guardrail:** Chromium caches decoded GIF frames, so a 1920×1080 / 200-frame GIF can exceed
 1GB of decoded bitmap. At import, check `width × height × frameCount` against a threshold and
 downscale once, storing the downscaled copy in `art/`. Typical album-art GIFs (500×500, ~30
@@ -372,7 +386,7 @@ should land while the codebase is small.
 | 1 | **Foundations** — **DONE** | Electron shell runs on Linux; main↔renderer IPC working; `electron-builder` produces a Windows zip; custom window chrome | — |
 | 2 | **Audio engine** — **DONE** | mp3/flac/wav play; seek, volume, play/pause/stop/next/prev; sequential order; transport bar; **dual-element preload** (§5) | Low |
 | 3 | **Metadata + import** — **DONE** | Folder/file import reads tags and embedded art; art cached to disk; tracks render in a flat list | Low–Med |
-| 4 | **Playlist format** | `.bday` saves and loads in both modes; **relink flow works across a simulated Linux→Windows path change**; multi-playlist store with per-playlist undo history (§5); **menu system** built from the `MENUS.md` table | **High** |
+| 4 | **Playlist format** — **DONE** | `.bday` saves and loads in both modes; **relink flow works across a simulated Linux→Windows path change**; multi-playlist store with per-playlist undo history (§5); **menu system** built from the `MENUS.md` table | **High** |
 | 5 | **Track list** | Virtualized flat list → group headers → collapse → drag-reorder → multi-select, smooth at 5,000 tracks; playlist tab strip with session restore (§5) | **High** |
 | 6 | **Art pane** | Large art with resizable split; GIF support with import guardrail; art resolution chain | Med |
 | 7 | **Playlist-side metadata** | Per-track rename / custom art / dB; playlist name, description, author, cover; subgroup editor | Med |
@@ -538,12 +552,72 @@ element state.
 
 ### Carried forward
 
-- **ReplayGain is read, not applied.** `replayGainDb` is on every track that has it (the test
-  FLAC and MP3 do: −6.9dB, −4.3dB). Whether it seeds per-track gain is decided in Phase 7.
-  Applying it changes loudness the user has already approved. Per-track gain itself is
-  confirmed core scope (concept brief; `overrides.gainDb`; Phase 7).
+- **ReplayGain seeds per-track gain (decided 2026-10-28; Phase 7).** When a track is added to
+  a playlist, `overrides.gainDb` starts at its ReplayGain track gain (`replayGainDb`), or 0dB
+  if it has none. From then on it's an ordinary per-playlist value the user can adjust, saved
+  in the `.bday`. Until Phase 7, `replayGainDb` is read and stored but not applied.
 - **Art cache has no eviction.** It only grows. Cheap to add a sweep later (delete entries no
   open playlist references); not urgent at album-art sizes.
 - **The menu system is built in Phase 4** (decided 2026-10-28), alongside the first real File
   items (New/Open/Save). The Add buttons in the list header move into File then.
+
+---
+
+## 12. Phase 4 — Complete (2026-10-28)
+
+Done-when met: `.bday` saves and loads in both modes, and **a playlist saved on Windows
+(`C:\Users\Me\Music\...`) relinks on Linux from an unrelated folder**. Locating one track
+by hand taught `C:\Users\Me → ~`, which found a second by mapping and a renamed third by
+fingerprint. A fourth, truly deleted track stayed missing and says so.
+
+### What's built
+
+- **Format** (`bday.mjs`): stored audio, deflated manifest, atomic writes (temp file + rename,
+  retried on Windows lock errors), rejects non-zips and newer `formatVersion`s.
+- **Relinking** (`relink.mjs`, `fingerprint.mjs`): the §4 chain, plus a case-insensitive retry
+  for Windows-made paths on Linux. Paths from either OS are parsed by hand, not with the native
+  `path` module. Only audio files are ever accepted, because a `.bday` is untrusted input.
+- **Folder mappings** in `userData/config.json`, learned from manual relinks and editable
+  under Options ▸ Folder Mappings. Recent files live there too.
+- **Store** (`store/playlists.js`): many playlists with `viewedId` / `playingId`; one undoable
+  `edit()` path with per-playlist history (200 steps); dirty = `doc !== savedDoc`.
+- **Menu system** (`menus/commands.js`, `MenuBar.jsx`): one command table drives the menus,
+  keyboard shortcuts and Help ▸ Keyboard Shortcuts. Electron's default menu is removed (it
+  claimed Ctrl+W/Ctrl+Q); F12 toggles devtools in dev.
+- **Unsaved changes**: closing the window, New, Open and Close Playlist all ask
+  Save / Don't Save / Cancel (native dialog). Main holds the window open until the renderer
+  confirms, unless the renderer has crashed or is still loading.
+
+### Decisions made while building
+
+- **Phase 4 shows one playlist at a time.** New and Open *replace* the viewed playlist, after
+  asking about unsaved changes. A playlist that's playing when replaced keeps playing out of
+  sight, and is released when playback moves to another playlist. Phase 5's tabs turn this into
+  "open alongside".
+- **Playback URLs never change across saves.** Bundling, extracting and re-saving a bundle all
+  move audio. Main *repoints* the existing URL at the new location, so a playing track keeps
+  playing and can still seek. Verified by converting reference → bundled → reference mid-song.
+- **Save targets are main's choice.** The renderer sends the document and playback URLs; main
+  maps URLs back to real sources and writes only to paths chosen in a dialog or Open Recent.
+- **Unnamed playlists show their file name.** `meta.name` stays empty until set (Phase 7).
+- **Bundling a playlist with missing tracks** bundles what it can, keeps the missing ones as
+  references, and says how many it couldn't include.
+- **Bundled → reference** asks for a folder and extracts into `<name> audio/` inside it.
+
+### Known risks to check on Windows
+
+- **Re-saving a bundle while one of its tracks plays** renames over a file with open read
+  handles. libuv opens files with `FILE_SHARE_DELETE`, so this should work. Lock errors are
+  retried. But it has only been verified on Linux.
+- Drive letters, UNC paths and backslashes are covered by unit tests of the path parsing,
+  not on a real Windows machine.
+
+### Testing
+
+`bday`/`relink`/`fingerprint` are Electron-free and unit-tested from plain Node. The app was
+driven end to end through the **real** `main.mjs`, with native dialogs answered by a script:
+import → undo/redo (menu label and Ctrl+Z/Ctrl+Y) → play → save → bundle mid-song + seek →
+export copy → extract mid-song + seek → open the Windows playlist → relink → play a missing
+track → quit with Cancel, then Don't Save. All 19 end-to-end checks and 6 unit-test groups passed. A packaged build contains
+yazl/yauzl and launches.
 

@@ -43,11 +43,18 @@ export const dbToGain = (db) => Math.pow(10, db / 20);
 const volumeToGain = (volume) => volume * volume;
 
 /**
- * Which queue index plays after `index`, or -1 to stop.
- * Phase 8 replaces this with the shuffle permutation cursor (PLAN.md §5).
+ * Which queue index plays after `index`, or -1 to stop. Missing tracks (no
+ * URL) are skipped. Phase 8 replaces this with the shuffle permutation cursor
+ * (PLAN.md §5).
  */
-function nextIndex(index, length) {
-  return index + 1 < length ? index + 1 : -1;
+function nextIndex(index, queue) {
+  for (let i = index + 1; i < queue.length; i++) if (queue[i].url) return i;
+  return -1;
+}
+
+function previousIndex(index, queue) {
+  for (let i = index - 1; i >= 0; i--) if (queue[i].url) return i;
+  return -1;
 }
 
 class Deck {
@@ -58,8 +65,12 @@ class Deck {
     this.element.preload = 'auto';
     this.gain = context.createGain();
     context.createMediaElementSource(this.element).connect(this.gain).connect(destination);
-    /** Queue index loaded into this deck, or -1. */
-    this.index = -1;
+    /**
+     * The track loaded into this deck. Identity, not queue position: the
+     * playlist can be edited while a track is preloaded, and positions shift.
+     */
+    this.trackId = null;
+    this.url = null;
     /**
      * Bumped on every load. Async results (a play() rejection) carry the value
      * they started with, so a failure report from a previous load can't be
@@ -68,8 +79,13 @@ class Deck {
     this.loadId = 0;
   }
 
-  load(track, index) {
-    this.index = index;
+  holds(track) {
+    return Boolean(track) && this.trackId === track.id && this.url === track.url;
+  }
+
+  load(track) {
+    this.trackId = track.id;
+    this.url = track.url;
     this.loadId += 1;
     this.gain.gain.value = dbToGain(track.gainDb ?? 0);
     this.element.src = track.url;
@@ -77,7 +93,8 @@ class Deck {
   }
 
   clear() {
-    this.index = -1;
+    this.trackId = null;
+    this.url = null;
     this.loadId += 1;
     this.element.pause();
     this.element.removeAttribute('src');
@@ -120,10 +137,28 @@ class Player {
 
   // --- Queue --------------------------------------------------------------
 
-  /** Append tracks: { url, title, gainDb?, ... }. Indices of existing tracks don't change. */
-  addTracks(tracks) {
-    const queue = [...this.#state.queue, ...tracks];
-    this.#set({ queue, status: this.#state.status === 'empty' && queue.length ? 'stopped' : this.#state.status });
+  /**
+   * Replace the queue: { id, url, title, gainDb?, ... } per track, url null
+   * when missing. The store calls this whenever the playing playlist changes.
+   * The current track keeps playing and keeps its place, found by id.
+   */
+  setQueue(queue) {
+    const current = this.#state.queue[this.#state.index];
+    const index = current ? queue.findIndex((track) => track.id === current.id) : -1;
+
+    if (current && index < 0) {
+      // The playing track left its playlist (for example, its add was undone).
+      this.#active?.clear();
+      this.#idle?.clear();
+      this.#set({ queue, index: -1, status: queue.length ? 'stopped' : 'empty', duration: 0, error: null });
+      return;
+    }
+
+    // A preload for a track that's no longer queued is wasted; #maybePreload
+    // picks the right one on the next timeupdate.
+    if (this.#idle && !queue.some((track) => this.#idle.holds(track))) this.#idle.clear();
+    const { status } = this.#state;
+    this.#set({ queue, index, status: !queue.length ? 'empty' : status === 'empty' ? 'stopped' : status });
   }
 
   // --- Transport ----------------------------------------------------------
@@ -138,8 +173,11 @@ class Player {
     if (status === 'playing') this.pause();
     else if (status === 'paused') this.#resume();
     // Stopped with the track still loaded: play from wherever it was seeked to.
-    else if (status === 'stopped' && index >= 0 && this.#active?.index === index) this.#resume();
-    else if (queue.length) this.#start(Math.max(index, 0));
+    else if (status === 'stopped' && index >= 0 && this.#active?.holds(queue[index])) this.#resume();
+    else {
+      const start = index >= 0 ? index : nextIndex(-1, queue);
+      if (start >= 0) this.#start(start);
+    }
   }
 
   pause() {
@@ -158,18 +196,19 @@ class Player {
 
   next() {
     const { index, queue } = this.#state;
-    const target = nextIndex(index, queue.length);
+    const target = nextIndex(index, queue);
     if (target >= 0) this.#start(target);
   }
 
   previous() {
-    const { index } = this.#state;
-    if (this.getPosition() > RESTART_THRESHOLD_S || index <= 0) this.seek(0);
-    else this.#start(index - 1);
+    const { index, queue } = this.#state;
+    const target = previousIndex(index, queue);
+    if (this.getPosition() > RESTART_THRESHOLD_S || target < 0) this.seek(0);
+    else this.#start(target);
   }
 
   seek(seconds) {
-    if (!this.#active || this.#active.index < 0) return;
+    if (!this.#active?.trackId) return;
     const { duration } = this.#state;
     this.#active.element.currentTime = Math.min(Math.max(seconds, 0), duration || 0);
   }
@@ -236,7 +275,7 @@ class Player {
         this.#set({ duration: element.duration });
       }
     };
-    const onError = () => deck === this.#active && deck.index >= 0 && this.#fail(deck.index);
+    const onError = () => deck === this.#active && deck.trackId && this.#fail(this.#state.index);
 
     element.addEventListener('ended', onEnded);
     element.addEventListener('timeupdate', onTimeUpdate);
@@ -254,11 +293,19 @@ class Player {
     this.#ensureGraph();
     const track = this.#state.queue[index];
 
-    if (this.#idle.index === index) {
+    if (!track.url) {
+      // Missing audio (not relinked). Automatic advance never lands here.
+      this.#active.clear();
+      this.#idle.clear();
+      this.#set({ index, status: 'stopped', duration: 0, error: { index, message: `"${track.title}" is missing` } });
+      return;
+    }
+
+    if (this.#idle.holds(track)) {
       // Preloaded: swap decks so playback starts from already-buffered audio.
       [this.#active, this.#idle] = [this.#idle, this.#active];
     } else {
-      this.#active.load(track, index);
+      this.#active.load(track);
     }
     this.#idle.clear();
 
@@ -280,7 +327,8 @@ class Player {
 
   #playActive() {
     const deck = this.#active;
-    const { loadId, index } = deck;
+    const { loadId } = deck;
+    const { index } = this.#state;
     this.#context.resume();
     deck.element.play().catch((error) => {
       // AbortError means a newer load interrupted this play() — expected.
@@ -295,13 +343,13 @@ class Player {
     if (element.duration - element.currentTime > PRELOAD_WINDOW_S) return;
 
     const { index, queue } = this.#state;
-    const target = nextIndex(index, queue.length);
-    if (target >= 0 && this.#idle.index !== target) this.#idle.load(queue[target], target);
+    const target = nextIndex(index, queue);
+    if (target >= 0 && !this.#idle.holds(queue[target])) this.#idle.load(queue[target]);
   }
 
   #advance() {
     const { index, queue } = this.#state;
-    const target = nextIndex(index, queue.length);
+    const target = nextIndex(index, queue);
     if (target >= 0) {
       this.#start(target);
     } else {
@@ -319,7 +367,7 @@ class Player {
     const track = this.#state.queue[index];
     const failure = { index, message: `Couldn't play "${track.title}"` };
 
-    const target = nextIndex(index, this.#state.queue.length);
+    const target = nextIndex(index, this.#state.queue);
     if (target >= 0) {
       this.#start(target);
     } else {
