@@ -111,6 +111,7 @@ function LoadedPlaylist({ playlist }) {
     () => new Map(rows.map((row, i) => [row.type === 'group' ? `g:${row.key}` : row.id, i])),
     [rows]
   );
+  const orderIndex = useMemo(() => new Map(order.map((id, i) => [id, i])), [order]);
 
   // Rows have fixed heights, except a group header with a description, which
   // is measured once on screen (its text wraps). Such a header gets its own
@@ -237,11 +238,24 @@ function LoadedPlaylist({ playlist }) {
 
     const { ids } = dragging;
     const move = (target) => () => store.moveTracksTo(playlist.id, ids, target);
-    if (!grouped) {
-      return upper
-        ? { indicatorY: starts[i], apply: move({ beforeId: row.id }) }
-        : { indicatorY: starts[i + 1], apply: move({ afterId: row.id }) };
-    }
+    // Never into the middle of a chain: "before" a chain's later track means
+    // before its first, and "after" an earlier one, after its last.
+    const { order, linked } = layout;
+    // The drop line goes by that row; one in a collapsed group isn't shown,
+    // so the line stays by the row under the pointer.
+    const at = (place, apply) => {
+      if (place.beforeId) {
+        let id = place.beforeId;
+        while (linked.has(order[orderIndex.get(id) - 1])) id = order[orderIndex.get(id) - 1];
+        const shown = rowIndexById.get(id);
+        return { indicatorY: shown === undefined ? starts[i] : starts[shown], apply: apply({ beforeId: id }) };
+      }
+      let id = place.afterId;
+      while (linked.has(id)) id = order[orderIndex.get(id) + 1];
+      const shown = rowIndexById.get(id);
+      return { indicatorY: shown === undefined ? starts[upper ? i : i + 1] : starts[shown + 1], apply: apply({ afterId: id }) };
+    };
+    if (!grouped) return upper ? at({ beforeId: row.id }, move) : at({ afterId: row.id }, move);
 
     // Grouped: a track's tags decide its group, so a dropped track would jump
     // straight back anywhere else. Except a custom group: dropping there moves
@@ -254,20 +268,18 @@ function LoadedPlaylist({ playlist }) {
 
     if (row.type === 'track') {
       if (!accepts(row.group)) return null;
-      return upper
-        ? { indicatorY: starts[i], apply: into(row.group, { beforeId: row.id }) }
-        : { indicatorY: starts[i + 1], apply: into(row.group, { afterId: row.id }) };
+      return at(upper ? { beforeId: row.id } : { afterId: row.id }, (place) => into(row.group, place));
     }
     // The top half of a header means "the end of the group above".
     const above = layout.groups[layout.groups.indexOf(row.group) - 1];
     if (upper && above && accepts(above)) {
       const lastOther = [...above.trackIds].reverse().find((id) => !ids.includes(id));
-      if (lastOther) return { indicatorY: starts[i], apply: into(above, { afterId: lastOther }) };
+      if (lastOther) return at({ afterId: lastOther }, (place) => into(above, place));
     }
     // Otherwise, the start of this group.
     const firstOther = row.group.trackIds.find((id) => !ids.includes(id));
     if (!accepts(row.group) || !firstOther) return null;
-    return { indicatorY: starts[i + 1], apply: into(row.group, { beforeId: firstOther }) };
+    return at({ beforeId: firstOther }, (place) => into(row.group, place));
   };
 
   const contentY = (clientY) => {
@@ -351,7 +363,9 @@ function LoadedPlaylist({ playlist }) {
     beginPress(
       event,
       () => {
-        const ids = store.selectedIds(store.getState().playlists[playlist.id]);
+        // Chains move as one: dragging any of a chain's tracks drags all of it.
+        const current = store.getState().playlists[playlist.id];
+        const ids = store.chainsOf(current, store.selectedIds(current));
         return ids.length ? { kind: 'tracks', ids, label: ids.length === 1 ? trackTitle(ids[0]) : `${ids.length} tracks` } : null;
       },
       keepForDrag ? () => select([id], id) : null
@@ -520,6 +534,8 @@ function LoadedPlaylist({ playlist }) {
                 item.index % 2 && 'track--odd',
                 selection.has(row.id) && 'track--selected',
                 row.id === focusId && 'track--focus',
+                row.linkUp && 'track--link-up',
+                row.linkDown && 'track--link-down',
                 row.id === playingTrackId && 'track--current',
                 isMissing && 'track--missing',
               ]
@@ -541,7 +557,10 @@ function LoadedPlaylist({ playlist }) {
                     setContextMenu({ x: event.clientX, y: event.clientY, items: TRACK_CONTEXT_ITEMS });
                   }}
                 >
-                  <span className="track__number">{row.number}</span>
+                  <span className="track__number">
+                    {(row.linkUp || row.linkDown) && <span className="track__chain" aria-label="Linked" />}
+                    {row.number}
+                  </span>
                   {renamingId === row.id ? (
                     <RenameField track={track} onDone={(title) => finishRename(row.id, title)} />
                   ) : (
@@ -655,6 +674,8 @@ function RenameField({ track, onDone }) {
  */
 export function GroupHeader({ group, style, measureRef, index, selected, playing, onPointerDown, onDoubleClick, onToggle, onContextMenu }) {
   // The last step of the art resolution chain (store/art.js): a generated symbol.
+  // Options ▸ Show Track Shapes Instead of Art goes straight there.
+  const { showShapes } = ui.useUi();
   const block = <img className="group__art group__art--generated" src={symbolUrl(group.symbolSeed)} alt="" draggable={false} />;
   return (
     <div
@@ -677,7 +698,7 @@ export function GroupHeader({ group, style, measureRef, index, selected, playing
       >
         ›
       </button>
-      {group.artUrl ? <ArtImage key={group.artUrl} className="group__art" src={group.artUrl} fallback={block} /> : block}
+      {group.artUrl && !showShapes ? <ArtImage key={group.artUrl} className="group__art" src={group.artUrl} fallback={block} /> : block}
       <div className="group__text">
         <span className="group__main">{group.mainName}</span>
         {group.subNames.map((line, i) => (

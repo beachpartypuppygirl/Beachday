@@ -25,6 +25,8 @@ const DEFAULTS = {
   pauseGifs: true,
   /** Options ▸ Pause GIFs When Playback Pauses */
   pauseGifsWithPlayback: true,
+  /** Options ▸ Show Track Shapes Instead of Art: every track's generated symbol, art or not */
+  showShapes: false,
 };
 
 let configPath = null;

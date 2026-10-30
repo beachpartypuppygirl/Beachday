@@ -2,7 +2,7 @@
 
 Audio player and playlist curation tool for local music files. Linux + Windows.
 
-**Status:** Phases 1–7 complete; Phase 8 next.
+**Status:** Phases 1–8 complete; Phase 9 next.
 **Last updated:** 2026-10-30
 
 ---
@@ -390,7 +390,7 @@ should land while the codebase is small.
 | 5 | **Track list** — **DONE** | Virtualized flat list → group headers → collapse → drag-reorder → multi-select, smooth at 5,000 tracks; playlist tab strip with session restore (§5) | **High** |
 | 6 | **Art pane** — **DONE** | Large art with resizable split; GIF support with import guardrail; art resolution chain | Med |
 | 7 | **Playlist-side metadata** — **DONE** | Per-track rename / dB (custom art landed in Phase 6); playlist name, description, author, cover; subgroup editor | Med |
-| 8 | **Shuffle + links** | Permutation-cursor shuffle; shuffle-remaining; contiguous chains with multi-select Link/Unlink; mid-chain click behaviour; repeat modes | Med |
+| 8 | **Shuffle + links** — **DONE** | Permutation-cursor shuffle; shuffle-remaining; contiguous chains with multi-select Link/Unlink; mid-chain click behaviour; repeat modes | Med |
 | 9 | **Theming** | Per-playlist palette picker; derived tokens; contrast validation | Med |
 | 10 | **Lyrics + packaging** | LRCLIB fetch with toggle; art-pane lyrics modes; Windows zip + Linux AppImage; install docs for friends | Med |
 
@@ -896,4 +896,86 @@ the time today on the committed Phase 6 code too, with medians ~35ms against 8ms
 written. Profiling shows the same costs before and after Phase 7 (mostly React dev-mode
 element creation). The machine is busier; the threshold may want loosening, or measuring
 against the production build.
+
+---
+
+## 16. Phase 8 — Complete (2026-10-30)
+
+Done-when met: permutation-cursor shuffle with shuffle-remaining, contiguous chains with
+multi-select Link / Unlink, the mid-chain click rule, and repeat modes. All per §5.
+
+### What's built
+
+- **Play order** (`audio/sequence.js`, pure). The queue splits into **units**: a chain, or a
+  single track. Shuffle permutes units and plays each in order, so a chain is never broken
+  and only its head is a shuffle entry point. The shuffle is a list of track ids plus a
+  cursor: Previous walks back through what actually played, every track plays once per cycle,
+  and a new cycle (Repeat All) never opens with the unit that just closed the last.
+- **Queue edits keep the shuffle** (`reconcileShuffle`): units keep their order, removed
+  tracks drop out (the cursor sits "between two" if the playing track goes), and added or
+  newly linked units land at random places that are still to come this cycle.
+- **Picking a track while shuffling** moves its unit up to play now (`bringForward`), so it
+  isn't heard again later in the cycle. Picking mid-chain starts there and plays out the
+  chain, then the shuffle carries on: §5's rule, in both orders.
+- **Engine** (`engine.js`): `order` ('sequential' | 'shuffle'), `repeat` ('off' | 'all' |
+  'one'), `stopAfterCurrent`. Repeat One replays the track when it ends; Next and Previous
+  always move. Repeat All wraps (sequential) or reshuffles. Turning shuffle on, or
+  Reshuffle, puts the playing unit first. Play with nothing loaded starts at the top, or at
+  the start of a fresh shuffle. Order and repeat persist like volume (`localStorage`).
+- **Stop After Current**: stops when the track ends, with the next track cued (loaded, not
+  playing) so Play carries on from there, then switches itself off.
+- **Transport**: shuffle and repeat toggles either side of the round buttons, lit when on.
+  Repeat cycles Off → All → One, marked with a small "1".
+- **Playback menu**: Order ▸ Sequential / Shuffle, Repeat ▸ Off / All / One, Reshuffle,
+  Stop After Current.
+- **Link Selected** (Ctrl+L): the selection and any chains it touches become one chain in
+  display order. Tracks that weren't neighbours move up to follow the first. In a grouped
+  view, tracks from other groups join the first one's group (pinned). Always succeeds.
+- **Unlink** (Ctrl+Shift+L): the selected tracks leave their chains (links into and out of
+  each are cut). Select a whole chain to dissolve it.
+- **Chains stay contiguous through every edit**: dragging any chain member drags the whole
+  chain; a drop that would land inside a chain lands before or after it instead; removing
+  (or cutting) a chain's middle track closes the chain up; Move to Group and New Group
+  take whole chains; a copied chain pastes as a chain (new ids, links remapped).
+- **Drawn** as a rail down the left edge of the rows, with a node per track.
+
+### Decisions made while building
+
+- **A link counts only when contiguous in display order** (`grouping.js linkedIds`, and
+  `sequence.js unitsOf` reads the queue the same way). Edits keep chains contiguous, so this
+  only matters when something regroups the playlist (a template change, pinning part of a
+  chain elsewhere): the split link goes quiet rather than half-working, and comes back if the
+  tracks are neighbours again. It stays in the file.
+- **Shuffle state lives in the engine**, not the playlist: it's playback, not curation.
+- **Order and repeat are app-level** (like volume), not per playlist.
+- **Stop After Current was pulled in** (it was ✦, unphased): it's playback-order logic and
+  fell out of the same code.
+- **Options ▸ Show Track Shapes Instead of Art** (added after review): the art pane, group
+  header thumbnails and the OS overlay show every track's generated symbol, art or not, so
+  the shapes can be seen on tracks that have art. App-level, in `config.json` (`showShapes`),
+  also in the art pane's right-click menu. The playlist cover in the header is the
+  playlist's own picture, not a track's, so it stays. Nothing is removed: switching it off
+  brings every piece of art back.
+- Not built: §5's chain-only true gapless (the escape hatch). Chain transitions use the
+  normal dual-deck preload (~1ms measured in Phase 2). Revisit if a seam bothers you.
+
+### Testing
+
+`tests/unit/sequence.test.mjs`: units (and stale links not counting), 200 seeded shuffles
+(every track once, chains whole and in order, only heads lead, first / notFirst), reconcile
+(order and cursor kept, additions ahead, removal, new chains), bringForward, and chains in the
+layout (rails, withChains, a link split by grouping going quiet).
+`tests/e2e/phase8.steps.mjs` (30 checks): real Ctrl+L / Ctrl+Shift+L, healing, paste, real
+drags (into a chain's middle; a chain's tail dragging the chain), playing tracks to their real
+end for chains, shuffle pick-and-continue, Previous, Repeat One / All / Off, Stop After
+Current; real clicks on the transport toggles; grouped linking across groups; links through
+save and reopen. `phase6.steps.mjs` gained the Show Track Shapes checks (pane, headers, a
+512px symbol in the overlay, config, back off).
+
+Phase 5's 5,000-track scroll check was loosened at the user's request to median < 50ms and
+worst step < 100ms (was worst < 50ms): today's host runs it at 23–36ms median with worst steps
+to ~70ms, with no code regression behind it.
+
+Test audio moved out of the project to `~/Desktop/audiotracks` (21 tracks; the tests use
+three of them). `tests/fixtures.mjs` reads from there, or `$BEACHDAY_TEST_AUDIO`.
 

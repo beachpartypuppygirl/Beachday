@@ -140,11 +140,12 @@ function Splitter({ workspace, fraction }) {
  * The playing track's art, through the full chain (store/art.js): its own
  * art, its group's, the playlist cover, then its generated symbol.
  * A GIF here pauses with the music (Options ▸ Pause GIFs When Playback Pauses).
+ * Options ▸ Show Track Shapes Instead of Art skips straight to the symbol.
  */
 function ArtPane() {
   const { current, status } = usePlayer();
   const { playlists, playingId } = useSyncExternalStore(store.subscribe, store.getState);
-  const { pauseGifsWithPlayback } = useUi();
+  const { pauseGifsWithPlayback, showShapes } = useUi();
 
   if (!current) {
     return (
@@ -155,7 +156,7 @@ function ArtPane() {
     );
   }
   const block = <img className="art art--generated" src={symbolUrl(current.symbolSeed)} alt="" draggable={false} />;
-  const url = store.paneArtUrl(playlists[playingId], current.id) ?? current.artUrl;
+  const url = showShapes ? null : (store.paneArtUrl(playlists[playingId], current.id) ?? current.artUrl);
   const paused = pauseGifsWithPlayback && status !== 'playing';
   return url ? <ArtImage key={url} className="art" src={url} fallback={block} paused={paused} /> : block;
 }

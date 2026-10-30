@@ -128,14 +128,60 @@ const text = (value) => (typeof value === 'string' ? value : '');
  *   groups: object[],                null when grouping is off
  *   rows: object[],                  flattened, collapse applied
  *   groupOf: Map<string, object>,    trackId -> group
+ *   linked: Set<string>,             tracks whose link to the next track holds (see linkedIds)
  * }}
+ * Track rows carry linkUp / linkDown: whether they're joined to the row above
+ * or below in a chain, for drawing it.
  */
 export function buildLayout(doc, resolution, collapsed) {
+  const layout = groupedLayout(doc, resolution, collapsed);
+  const linked = linkedIds(doc.tracks, layout.order);
+  for (const row of layout.rows) {
+    if (row.type !== 'track') continue;
+    row.linkDown = linked.has(row.id);
+    row.linkUp = linked.has(layout.previousOf?.get(row.id));
+  }
+  delete layout.previousOf;
+  return { ...layout, linked };
+}
+
+/**
+ * Chains (PLAN.md §5): a track's `linkNext` only counts when the track it
+ * names comes straight after it in display order, the order that plays. A
+ * link that stopped being contiguous isn't a link (audio/sequence.js reads
+ * the queue the same way). Returns the ids whose link to the next holds.
+ */
+export function linkedIds(tracks, order) {
+  const byId = new Map(tracks.map((track) => [track.id, track]));
+  const linked = new Set();
+  order.forEach((id, i) => {
+    const next = byId.get(id).linkNext;
+    if (next && next === order[i + 1]) linked.add(id);
+  });
+  return linked;
+}
+
+/** The whole chains holding `ids`, as track ids in display order. */
+export function withChains(layout, ids) {
+  const wanted = new Set(ids);
+  const { order, linked } = layout;
+  const result = [];
+  let chain = [];
+  order.forEach((id, i) => {
+    chain.push(id);
+    if (linked.has(id) && i < order.length - 1) return;
+    if (chain.some((member) => wanted.has(member))) result.push(...chain);
+    chain = [];
+  });
+  return result;
+}
+
+function groupedLayout(doc, resolution, collapsed) {
   const grouping = doc.grouping;
   if (!grouping) {
     const order = doc.tracks.map((track) => track.id);
     const rows = doc.tracks.map((track, i) => ({ type: 'track', id: track.id, number: i + 1, group: null }));
-    return { order, groups: null, rows, groupOf: new Map() };
+    return { order, groups: null, rows, groupOf: new Map(), previousOf: new Map(order.slice(1).map((id, i) => [id, order[i]])) };
   }
 
   const entries = new Map();
@@ -209,7 +255,7 @@ export function buildLayout(doc, resolution, collapsed) {
       if (!group.collapsed) rows.push({ type: 'track', id, number: i + 1, group });
     });
   }
-  return { order, groups, rows, groupOf };
+  return { order, groups, rows, groupOf, previousOf: new Map(order.slice(1).map((id, i) => [id, order[i]])) };
 }
 
 /**

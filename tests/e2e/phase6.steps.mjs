@@ -166,6 +166,22 @@ export default async ({ w, answers, log, S }) => {
   s = await R(`store.undo(P().id); return byTitle('feel sooooo hard').overrides.art ?? null;`);
   check('undo restores it', s?.endsWith('.gif'), s);
 
+  // --- Options ▸ Show Track Shapes Instead of Art ---
+  s = await R(`store.play(P().id, byTitle('Fly Octo Fly').id); await until(() => pane().img); const art = pane().img;
+    cmds.runCommand('options.showShapes'); await until(() => pane().generated);
+    const groups = [...document.querySelectorAll('.tracklist__canvas > .group')];
+    await until(async () => navigator.mediaSession.metadata?.artwork?.[0] && (await createImageBitmap(await (await fetch(navigator.mediaSession.metadata.artwork[0].src)).blob())).width === 512);
+    const bitmap = await createImageBitmap(await (await fetch(navigator.mediaSession.metadata.artwork[0].src)).blob());
+    return { art, pane: pane(), expected: symbolUrl(symbolSeed(byTitle('Fly Octo Fly'))), groups: groups.length, generated: groups.filter((g) => g.querySelector('img.group__art--generated')).length,
+      overlay: bitmap.width, checked: cmds.resolveItem('options.showShapes', cmds.getContext()).checked, inArtMenu: cmds.ART_CONTEXT_ITEMS.includes('options.showShapes') };`);
+  check('Show Track Shapes Instead of Art: a track with art shows its shape in the pane', s.art && s.pane.generated && !s.pane.img && s.pane.symbol === s.expected && s.checked, { ...s, expected: '…', pane: { ...s.pane, symbol: '…' } });
+  check('…and in every group header, and the OS overlay (its 512px symbol); it’s in the art pane menu too', s.groups > 0 && s.generated === s.groups && s.overlay === 512 && s.inArtMenu, s);
+  await sleep(300);
+  check('…saved to app config', config().showShapes === true, config());
+  s = await R(`cmds.runCommand('options.showShapes'); await until(() => pane().img); return { pane: pane(), groupArt: document.querySelectorAll('.tracklist__canvas > .group .group__art:not(.group__art--generated)').length };`);
+  check('switching it off brings the art back', s.pane.img && !s.pane.generated && s.groupArt > 0 && config().showShapes === false, s);
+  await R(`player.stop();`);
+
   // --- A hand-made .bday: an over-budget GIF as its cover, a bogus art reference, deflated art ---
   const hostile = H + '/Downloads/inbox/handmade.bday';
   fs.copyFileSync(bigGif, S + '/out/cover.gif');

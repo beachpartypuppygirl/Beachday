@@ -1,5 +1,5 @@
 import { player } from '../audio/engine.js';
-import { applyGroupEdits, buildLayout, moveTracks, moveGroup, newCustomKey, pinTracks, PRESETS } from './grouping.js';
+import { applyGroupEdits, buildLayout, moveTracks, moveGroup, newCustomKey, pinTracks, PRESETS, withChains } from './grouping.js';
 import { artRefUrl, symbolSeed, trackArtUrl } from './art.js';
 import { clampGain, trackGainDb } from './gain.js';
 
@@ -135,6 +135,8 @@ export function trackView(track, resolution) {
     album: track.tags.album,
     duration: track.tags.duration,
     gainDb: trackGainDb(track),
+    // The engine works out chains from this (audio/sequence.js).
+    linkNext: track.linkNext ?? null,
     path: track.absPath,
   };
 }
@@ -183,6 +185,9 @@ export function paneArtUrl(playlist, trackId) {
     artRefUrl(playlist.doc.meta.cover)
   );
 }
+
+/** `ids` plus the rest of any chain they're in, in display order: chains move as one. */
+export const chainsOf = (playlist, ids) => withChains(layoutOf(playlist), ids);
 
 /** Selected track ids in display order. */
 export function selectedIds(playlist) {
@@ -343,10 +348,18 @@ export function removeTracks(id, ids, label) {
   const lastIndex = Math.max(...ids.map((trackId) => order.indexOf(trackId)));
   const nextFocus = order.slice(lastIndex + 1).find((trackId) => !removing.has(trackId)) ??
     [...order].reverse().find((trackId) => !removing.has(trackId)) ?? null;
-  edit(id, label ?? plural(ids.length, 'Remove Track', 'Remove Tracks'), (doc) => ({
-    ...doc,
-    tracks: doc.tracks.filter((track) => !removing.has(track.id)),
-  }));
+  edit(id, label ?? plural(ids.length, 'Remove Track', 'Remove Tracks'), (doc) => {
+    // A chain closes up around removed tracks: A → B → C without B is A → C.
+    const byId = new Map(doc.tracks.map((track) => [track.id, track]));
+    const healed = (next) => {
+      while (next && removing.has(next)) next = byId.get(next)?.linkNext ?? null;
+      return next;
+    };
+    const tracks = doc.tracks
+      .filter((track) => !removing.has(track.id))
+      .map((track) => (track.linkNext && removing.has(track.linkNext) ? { ...track, linkNext: healed(track.linkNext) } : track));
+    return { ...doc, tracks };
+  });
   updateView(id, {
     selection: nextFocus ? new Set([nextFocus]) : new Set(),
     anchorId: nextFocus,
@@ -493,9 +506,11 @@ export function editGroups(id, edits, label = 'Edit Groups') {
 
 /** Track ▸ Move to Group: pin `ids` to group `key`, or null to follow their tags again. */
 export function moveToGroup(id, ids, key) {
+  const playlist = state.playlists[id];
+  const members = playlist ? chainsOf(playlist, ids) : ids;
   edit(id, key ? 'Move to Group' : 'Ungroup Tracks', (doc) => {
     if (!doc.grouping) return doc;
-    const tracks = pinTracks(doc.tracks, doc.grouping, ids, key);
+    const tracks = pinTracks(doc.tracks, doc.grouping, members, key);
     return tracks === doc.tracks ? doc : { ...doc, tracks };
   });
 }
@@ -507,11 +522,60 @@ export function moveToGroup(id, ids, key) {
  */
 export function createGroup(id, ids, mainName = 'New Group') {
   const key = newCustomKey();
+  const playlist = state.playlists[id];
+  const members = playlist ? chainsOf(playlist, ids) : ids;
   edit(id, 'New Group', (doc) => {
     const grouping = doc.grouping ?? PRESETS.manual;
-    return { ...doc, grouping, groups: [...doc.groups, { key, custom: true, mainName }], tracks: pinTracks(doc.tracks, grouping, ids, key) };
+    return { ...doc, grouping, groups: [...doc.groups, { key, custom: true, mainName }], tracks: pinTracks(doc.tracks, grouping, members, key) };
   });
   return key;
+}
+
+// --- Link chains (PLAN.md §5 "Chain editing — contiguous by definition") -----
+
+/**
+ * Track ▸ Link Selected: join the selection, and any chains it touches, into
+ * one chain in display order. Always succeeds:
+ *   - tracks that aren't neighbours move up to follow the first one
+ *   - in a grouped view, tracks from other groups join the first one's group
+ *     (pinned), since a chain has to sit inside one group to be contiguous
+ */
+export function linkTracks(id, ids) {
+  const playlist = state.playlists[id];
+  if (!playlist) return;
+  const layout = layoutOf(playlist);
+  const block = withChains(layout, ids);
+  if (block.length < 2) return;
+  edit(id, 'Link Tracks', (doc) => {
+    let tracks = doc.tracks;
+    if (doc.grouping) {
+      const home = layout.groupOf.get(block[0]);
+      if (block.some((trackId) => layout.groupOf.get(trackId) !== home)) tracks = pinTracks(tracks, doc.grouping, block, home.key);
+    }
+    tracks = moveTracks(tracks, block.slice(1), null, block[0]);
+    const next = new Map(block.map((trackId, i) => [trackId, block[i + 1] ?? null]));
+    const inBlock = new Set(block);
+    tracks = tracks.map((track) => {
+      // Inside the block: link to the next one. Outside: a stale link into it would be a second way in.
+      const linkNext = next.has(track.id) ? next.get(track.id) : inBlock.has(track.linkNext) ? null : (track.linkNext ?? null);
+      return linkNext === (track.linkNext ?? null) ? track : { ...track, linkNext };
+    });
+    return { ...doc, tracks };
+  });
+}
+
+/** Track ▸ Unlink: the selected tracks leave their chains (the links into and out of each are cut). */
+export function unlinkTracks(id, ids) {
+  const leaving = new Set(ids);
+  edit(id, 'Unlink Tracks', (doc) => {
+    let changed = false;
+    const tracks = doc.tracks.map((track) => {
+      if (!track.linkNext || !(leaving.has(track.id) || leaving.has(track.linkNext))) return track;
+      changed = true;
+      return { ...track, linkNext: null };
+    });
+    return changed ? { ...doc, tracks } : doc;
+  });
 }
 
 // --- View state (not undoable) -----------------------------------------------
@@ -591,7 +655,7 @@ const queueOf = (playlist) => {
   return layoutOf(playlist).order.map((id) => trackView(byId.get(id), playlist.resolution));
 };
 
-/** Start playing track `trackId` of playlist `id`. */
+/** Start playing track `trackId` of playlist `id`; null plays from the start (or a fresh shuffle). */
 export function play(id, trackId) {
   const playlist = state.playlists[id];
   if (!playlist) return;
@@ -601,6 +665,7 @@ export function play(id, trackId) {
     if (state.playingId && !state.order.includes(state.playingId)) delete playlists[state.playingId];
     set({ playlists, playingId: id });
   }
+  if (trackId === null) return player.playFirst();
   const index = layoutOf(state.playlists[id]).order.indexOf(trackId);
   if (index >= 0) player.playIndex(index);
 }

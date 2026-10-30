@@ -42,6 +42,7 @@ export function getContext() {
     artPane: ui.getState().artPane,
     pauseGifs: ui.getState().pauseGifs,
     pauseGifsWithPlayback: ui.getState().pauseGifsWithPlayback,
+    showShapes: ui.getState().showShapes,
     nowPlaying: playingTrack ? { playlist: playlists[playingId], track: playingTrack } : null,
     busy: Boolean(ui.getState().busy),
   };
@@ -63,6 +64,13 @@ const hasSelection = (ctx) => ready(ctx) && ctx.selected.length > 0;
 const oneFound = (ctx) =>
   ready(ctx) && ctx.selected.length === 1 && ctx.playlist.resolution[ctx.selected[0]]?.status === 'ok';
 const grouped = (ctx) => ready(ctx) && Boolean(ctx.playlist.doc.grouping);
+/** Whether any selected track is linked to the one before or after it. */
+const inChain = (ctx) => {
+  const { order, linked } = store.layoutOf(ctx.playlist);
+  if (!linked.size) return false;
+  const selected = new Set(ctx.selected);
+  return order.some((id, i) => linked.has(id) && (selected.has(id) || selected.has(order[i + 1])));
+};
 const selectedTracks = (ctx) => {
   const ids = new Set(ctx.selected);
   return ctx.playlist.doc.tracks.filter((track) => ids.has(track.id));
@@ -178,15 +186,39 @@ export const COMMANDS = {
     label: (ctx) => (ctx.playerState.status === 'playing' ? 'Pause' : 'Play'),
     shortcut: 'Space',
     run: (ctx) => {
-      // Nothing loaded yet: start the viewed playlist — from the selection, or the top.
+      // Nothing loaded yet: start the viewed playlist — from the selection, or
+      // the start (the top, or a fresh shuffle).
       if (store.getState().playingId || !ctx.playlist?.loaded) return player.togglePlay();
-      const first = ctx.selected[0] ?? store.layoutOf(ctx.playlist).order[0];
-      if (first) store.play(ctx.playlist.id, first);
+      if (ctx.playlist.doc.tracks.length) store.play(ctx.playlist.id, ctx.selected[0] ?? null);
     },
   },
   'playback.stop': { label: 'Stop', run: () => player.stop() },
   'playback.previous': { label: 'Previous', run: () => player.previous() },
   'playback.next': { label: 'Next', run: () => player.next() },
+  'playback.order.sequential': {
+    label: 'Sequential',
+    checked: (ctx) => ctx.playerState.order === 'sequential',
+    run: () => player.setOrder('sequential'),
+  },
+  'playback.order.shuffle': {
+    label: 'Shuffle',
+    checked: (ctx) => ctx.playerState.order === 'shuffle',
+    run: () => player.setOrder('shuffle'),
+  },
+  'playback.repeat.off': { label: 'Off', checked: (ctx) => ctx.playerState.repeat === 'off', run: () => player.setRepeat('off') },
+  'playback.repeat.all': { label: 'All', checked: (ctx) => ctx.playerState.repeat === 'all', run: () => player.setRepeat('all') },
+  'playback.repeat.one': { label: 'One', checked: (ctx) => ctx.playerState.repeat === 'one', run: () => player.setRepeat('one') },
+  'playback.reshuffle': {
+    label: 'Reshuffle',
+    enabled: (ctx) => ctx.playerState.order === 'shuffle' && ctx.playerState.queue.length > 1,
+    run: () => player.reshuffle(),
+  },
+  'playback.stopAfterCurrent': {
+    label: 'Stop After Current',
+    checked: (ctx) => ctx.playerState.stopAfterCurrent,
+    enabled: (ctx) => Boolean(ctx.playerState.current),
+    run: (ctx) => player.setStopAfterCurrent(!ctx.playerState.stopAfterCurrent),
+  },
   'playback.volumeUp': {
     label: 'Volume Up',
     run: (ctx) => player.setVolume(ctx.playerState.volume + VOLUME_STEP),
@@ -275,6 +307,18 @@ export const COMMANDS = {
     label: 'Reset Gain',
     enabled: (ctx) => hasSelection(ctx) && selectedTracks(ctx).some((track) => trackGainDb(track) !== seedGainDb(track)),
     run: (ctx) => store.setTrackGain(ctx.playlist.id, ctx.selected, null),
+  },
+  'track.link': {
+    label: 'Link Selected',
+    shortcut: 'Ctrl+L',
+    enabled: (ctx) => ready(ctx) && ctx.selected.length > 1,
+    run: (ctx) => store.linkTracks(ctx.playlist.id, ctx.selected),
+  },
+  'track.unlink': {
+    label: 'Unlink',
+    shortcut: 'Ctrl+Shift+L',
+    enabled: (ctx) => hasSelection(ctx) && inChain(ctx),
+    run: (ctx) => store.unlinkTracks(ctx.playlist.id, ctx.selected),
   },
   'track.newGroup': {
     label: 'New Group…',
@@ -365,6 +409,12 @@ export const COMMANDS = {
     run: actions.togglePauseGifsWithPlayback,
   },
 
+  'options.showShapes': {
+    label: 'Show Track Shapes Instead of Art',
+    checked: (ctx) => ctx.showShapes,
+    run: (ctx) => ui.setShowShapes(!ctx.showShapes),
+  },
+
   // --- Help ---
   'help.shortcuts': { label: 'Keyboard Shortcuts', run: () => ui.openDialog('shortcuts') },
   'help.about': { label: 'About Beachday', run: () => ui.openDialog('about') },
@@ -402,6 +452,8 @@ export const TRACK_ITEMS = [
   'track.gain',
   'track.resetGain',
   '-',
+  'track.link',
+  'track.unlink',
   MOVE_TO_GROUP,
   '-',
   'track.showInFolder',
@@ -437,6 +489,7 @@ export const ART_CONTEXT_ITEMS = [
   'view.resetArtPane',
   'view.showArtPane',
   '-',
+  'options.showShapes',
   'options.pauseGifsWithPlayback',
 ];
 
@@ -505,6 +558,11 @@ export const MENUS = [
       'playback.previous',
       'playback.next',
       '-',
+      { label: 'Order', items: ['playback.order.sequential', 'playback.order.shuffle'] },
+      { label: 'Repeat', items: ['playback.repeat.off', 'playback.repeat.all', 'playback.repeat.one'] },
+      'playback.reshuffle',
+      'playback.stopAfterCurrent',
+      '-',
       'playback.volumeUp',
       'playback.volumeDown',
       'playback.mute',
@@ -532,7 +590,10 @@ export const MENUS = [
     ],
   },
   { label: 'Track', items: TRACK_ITEMS },
-  { label: 'Options', items: ['options.folderMappings', 'options.restoreTabs', '-', 'options.pauseGifs', 'options.pauseGifsWithPlayback'] },
+  {
+    label: 'Options',
+    items: ['options.folderMappings', 'options.restoreTabs', '-', 'options.showShapes', 'options.pauseGifs', 'options.pauseGifsWithPlayback'],
+  },
   { label: 'Help', items: ['help.shortcuts', '-', 'help.about'] },
 ];
 

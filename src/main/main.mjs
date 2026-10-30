@@ -175,13 +175,13 @@ ipcMain.handle('tracks:import-dropped', (event, paths) => {
 
 // View preferences: app-level, never stored in a playlist.
 ipcMain.handle('prefs:get', () => {
-  const { artPane, pauseGifs, pauseGifsWithPlayback } = getConfig();
-  return { artPane, pauseGifs, pauseGifsWithPlayback };
+  const { artPane, pauseGifs, pauseGifsWithPlayback, showShapes } = getConfig();
+  return { artPane, pauseGifs, pauseGifsWithPlayback, showShapes };
 });
 
 ipcMain.handle('prefs:set', (_event, patch) => {
   const clean = {};
-  for (const key of ['pauseGifs', 'pauseGifsWithPlayback']) {
+  for (const key of ['pauseGifs', 'pauseGifsWithPlayback', 'showShapes']) {
     if (typeof patch?.[key] === 'boolean') clean[key] = patch[key];
   }
   if (patch?.artPane) {

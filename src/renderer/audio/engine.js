@@ -14,6 +14,12 @@
  * <audio> streams the file; decodeAudioData would hold the whole decoded PCM
  * in memory (~250MB for a 40MB FLAC).
  *
+ * Order and repeat (Phase 8, PLAN.md §5): sequential follows the queue;
+ * shuffle walks a permutation of units (chains and single tracks, see
+ * sequence.js) with a cursor. Repeat Off stops at the end, All goes round
+ * again (reshuffled), One replays the track when it ends. Next and Previous
+ * always move, whatever the repeat mode.
+ *
  * The engine is plain JS with no React dependency. UI reads it through
  * subscribe()/getState() (see usePlayer.js); playback position is polled with
  * getPosition() rather than pushed, so the progress bar can animate per frame
@@ -21,6 +27,7 @@
  */
 
 import { symbolPng } from '../symbols.js';
+import { bringForward, reconcileShuffle, shuffleQueue, unitIdsOf } from './sequence.js';
 
 const PRELOAD_WINDOW_S = 10;
 // Pressing Previous this far into a track restarts it instead.
@@ -35,6 +42,8 @@ const LIMITER = { threshold: -1, knee: 0, ratio: 20, attack: 0.003, release: 0.2
 const MAKEUP_DB = -0.6 * LIMITER.threshold * (1 - 1 / LIMITER.ratio);
 
 const VOLUME_KEY = 'beachday.volume';
+const ORDER_KEY = 'beachday.order';
+const REPEAT_KEY = 'beachday.repeat';
 // Ramp time constant for volume changes; avoids zipper noise while dragging.
 const VOLUME_SMOOTHING_S = 0.015;
 
@@ -45,9 +54,8 @@ export const dbToGain = (db) => Math.pow(10, db / 20);
 const volumeToGain = (volume) => volume * volume;
 
 /**
- * Which queue index plays after `index`, or -1 to stop. Missing tracks (no
- * URL) are skipped. Phase 8 replaces this with the shuffle permutation cursor
- * (PLAN.md §5).
+ * Sequential order: which queue index plays after `index`, or -1 at the end.
+ * Missing tracks (no URL) are skipped. Shuffle walks its own list instead.
  */
 function nextIndex(index, queue) {
   for (let i = index + 1; i < queue.length; i++) if (queue[i].url) return i;
@@ -134,7 +142,21 @@ class Player {
     muted: false,
     /** { index, message } for the most recent track that failed to play */
     error: null,
+    /** Playback ▸ Order: 'sequential' | 'shuffle' */
+    order: loadSetting(ORDER_KEY, ['sequential', 'shuffle']),
+    /** Playback ▸ Repeat: 'off' | 'all' | 'one' */
+    repeat: loadSetting(REPEAT_KEY, ['off', 'all', 'one']),
+    /** Playback ▸ Stop After Current: stop when this track ends (then it switches itself off) */
+    stopAfterCurrent: false,
   };
+
+  /**
+   * Shuffle: track ids in play order, and the cursor into them: the current
+   * track's position, or a half-step between two when there's none (see
+   * sequence.js reconcileShuffle). Only meaningful while order is 'shuffle'.
+   */
+  #shuffled = [];
+  #shufflePos = -0.5;
 
   #context = null;
   #masterGain = null;
@@ -164,6 +186,9 @@ class Player {
   setQueue(queue) {
     const { current, status } = this.#state;
     const index = current ? queue.findIndex((track) => track.id === current.id) : -1;
+    if (this.#state.order === 'shuffle') {
+      ({ ids: this.#shuffled, pos: this.#shufflePos } = reconcileShuffle(this.#shuffled, this.#shufflePos, queue, current?.id ?? null));
+    }
 
     // A preload for a track that's no longer queued is wasted; #maybePreload
     // picks the right one on the next timeupdate.
@@ -234,10 +259,68 @@ class Player {
 
   // --- Transport ----------------------------------------------------------
 
+  /**
+   * Play queue position `index` (a double-click, Enter). While shuffling, its
+   * unit moves up to play now (sequence.js bringForward). A pick in the
+   * middle of a chain starts there and plays out the rest of the chain, in
+   * either order, since a chain's tracks follow each other in both.
+   */
   playIndex(index) {
-    if (index < 0 || index >= this.#state.queue.length) return;
+    const { queue, order, current } = this.#state;
+    if (index < 0 || index >= queue.length) return;
+    if (order === 'shuffle') {
+      const unit = unitIdsOf(queue).find((ids) => ids.includes(queue[index].id));
+      if (!unit.includes(current?.id)) {
+        ({ ids: this.#shuffled, pos: this.#shufflePos } = bringForward(this.#shuffled, this.#shufflePos, unit));
+      }
+    }
     this.#start(index);
   }
+
+  /** Play from the beginning: the top of the queue, or the start of a fresh shuffle. */
+  playFirst() {
+    const { queue, order } = this.#state;
+    if (order === 'shuffle') {
+      this.#shuffled = shuffleQueue(queue);
+      this.#shufflePos = -0.5;
+    }
+    const target = order === 'shuffle' ? this.#shuffleStep(1)?.index ?? -1 : nextIndex(-1, queue);
+    if (target >= 0) this.#start(target);
+  }
+
+  // --- Order and repeat ---------------------------------------------------
+
+  /** Playback ▸ Order. Turning shuffle on keeps the playing track playing, as the first of a fresh shuffle. */
+  setOrder(order) {
+    if (order === this.#state.order) return;
+    this.#set({ order });
+    saveSetting(ORDER_KEY, order);
+    if (order === 'shuffle') this.reshuffle();
+    this.#idle?.clear(); // A preload chosen for the old order is wrong now.
+  }
+
+  setRepeat(repeat) {
+    this.#set({ repeat });
+    saveSetting(REPEAT_KEY, repeat);
+    this.#idle?.clear();
+  }
+
+  /** Playback ▸ Reshuffle: a new order for everything, with the playing unit first. */
+  reshuffle() {
+    const { queue, current, index } = this.#state;
+    const playing = index >= 0 ? current.id : null;
+    this.#shuffled = shuffleQueue(queue, Math.random, { first: playing });
+    this.#shufflePos = playing ? this.#shuffled.indexOf(playing) : -0.5;
+    this.#idle?.clear();
+  }
+
+  setStopAfterCurrent(stopAfterCurrent) {
+    this.#set({ stopAfterCurrent });
+    this.#idle?.clear();
+  }
+
+  /** The shuffle's play order, as track ids, and where the cursor is (tests). */
+  getShuffle = () => ({ ids: [...this.#shuffled], pos: this.#shufflePos });
 
   togglePlay() {
     const { status, index, queue, current } = this.#state;
@@ -245,10 +328,8 @@ class Player {
     else if (status === 'paused') this.#resume();
     // Stopped with the track still loaded: play from wherever it was seeked to.
     else if (status === 'stopped' && this.#active?.holds(current)) this.#resume();
-    else {
-      const start = index >= 0 ? index : nextIndex(-1, queue);
-      if (start >= 0) this.#start(start);
-    }
+    else if (index >= 0) this.#start(index);
+    else this.playFirst();
   }
 
   pause() {
@@ -266,12 +347,15 @@ class Player {
   }
 
   next() {
-    const target = nextIndex(Math.floor(this.#cursor()), this.#state.queue);
+    const target = this.#nextTarget();
     if (target >= 0) this.#start(target);
   }
 
   previous() {
-    const target = previousIndex(Math.ceil(this.#cursor()), this.#state.queue);
+    const target =
+      this.#state.order === 'shuffle'
+        ? (this.#shuffleStep(-1)?.index ?? -1)
+        : previousIndex(Math.ceil(this.#cursor()), this.#state.queue);
     if (this.getPosition() > RESTART_THRESHOLD_S || target < 0) this.seek(0);
     else this.#start(target);
   }
@@ -358,9 +442,47 @@ class Player {
     });
   }
 
+  /**
+   * What plays after the current track, as a queue index, or -1 for nothing.
+   * `ended`: the track finished by itself, so Repeat One replays it. With
+   * `peek`, nothing changes: a shuffle that would have to start a new cycle
+   * says -1 (the preloader just doesn't preload across a reshuffle).
+   */
+  #nextTarget({ ended = false, peek = false } = {}) {
+    const { queue, order, repeat, index, current } = this.#state;
+    if (ended && repeat === 'one' && index >= 0 && current.url) return index;
+    if (order === 'shuffle') {
+      const step = this.#shuffleStep(1);
+      if (step) return step.index;
+      if (repeat !== 'all' || peek) return -1;
+      // A new cycle, which mustn't open with the unit that just finished.
+      this.#shuffled = shuffleQueue(queue, Math.random, { notFirst: current?.id });
+      this.#shufflePos = -0.5;
+      return this.#shuffleStep(1)?.index ?? -1;
+    }
+    const target = nextIndex(Math.floor(this.#cursor()), queue);
+    return target < 0 && repeat === 'all' ? nextIndex(-1, queue) : target;
+  }
+
+  /** The next (+1) or previous (-1) playable track in the shuffle: { index, pos }, or null. */
+  #shuffleStep(step) {
+    const { queue } = this.#state;
+    const indexById = new Map(queue.map((track, i) => [track.id, i]));
+    const ids = this.#shuffled;
+    for (let p = step > 0 ? Math.floor(this.#shufflePos) + 1 : Math.ceil(this.#shufflePos) - 1; p >= 0 && p < ids.length; p += step) {
+      const index = indexById.get(ids[p]);
+      if (index !== undefined && queue[index].url) return { index, pos: p };
+    }
+    return null;
+  }
+
   #start(index) {
     this.#ensureGraph();
     const track = this.#state.queue[index];
+    if (this.#state.order === 'shuffle') {
+      const at = this.#shuffled.indexOf(track.id);
+      if (at >= 0) this.#shufflePos = at;
+    }
 
     if (!track.url) {
       // Missing audio (not relinked). Automatic advance never lands here.
@@ -420,19 +542,46 @@ class Player {
     if (!Number.isFinite(element.duration)) return;
     if (element.duration - element.currentTime > PRELOAD_WINDOW_S) return;
 
-    const { queue } = this.#state;
-    const target = nextIndex(Math.floor(this.#cursor()), queue);
-    if (target >= 0 && !this.#idle.holds(queue[target])) this.#idle.load(queue[target]);
+    const { queue, index, stopAfterCurrent } = this.#state;
+    if (stopAfterCurrent) return;
+    const target = this.#nextTarget({ ended: true, peek: true });
+    // Repeat One restarts the playing deck; nothing to preload.
+    if (target >= 0 && target !== index && !this.#idle.holds(queue[target])) this.#idle.load(queue[target]);
   }
 
   #advance() {
-    const target = nextIndex(Math.floor(this.#cursor()), this.#state.queue);
-    if (target >= 0) {
+    const { stopAfterCurrent, index } = this.#state;
+    const target = this.#nextTarget({ ended: true });
+    if (stopAfterCurrent) {
+      // Stop, with whatever comes next waiting, so Play carries on from there.
+      this.#set({ stopAfterCurrent: false });
+      if (target >= 0 && target !== index) this.#cue(target);
+      else this.#stopAtStart();
+    } else if (target === index) {
+      // Repeat One.
+      this.#active.element.currentTime = 0;
+      this.#playActive();
+    } else if (target >= 0) {
       this.#start(target);
     } else {
-      this.#active.element.currentTime = 0;
-      this.#set({ status: 'stopped' });
+      this.#stopAtStart();
     }
+  }
+
+  #stopAtStart() {
+    this.#active.element.currentTime = 0;
+    this.#set({ status: 'stopped' });
+  }
+
+  /** Load queue position `index`, ready to play, without playing it. */
+  #cue(index) {
+    const track = this.#state.queue[index];
+    if (this.#idle.holds(track)) [this.#active, this.#idle] = [this.#idle, this.#active];
+    else this.#active.load(track);
+    this.#idle.clear();
+    if (this.#state.order === 'shuffle') this.#shufflePos = this.#shuffled.indexOf(track.id);
+    this.#set({ index, current: track, detachedAt: null, status: 'stopped', duration: 0, error: null });
+    this.#updateMediaSession(track);
   }
 
   /** A track couldn't be played: record it and move on rather than stalling. */
@@ -444,8 +593,8 @@ class Player {
     const track = this.#state.queue[index];
     const failure = { index, message: `Couldn't play "${track.title}"` };
 
-    const target = nextIndex(index, this.#state.queue);
-    if (target >= 0) {
+    const target = this.#nextTarget();
+    if (target >= 0 && target !== index) {
       this.#start(target);
     } else {
       this.#active.clear();
@@ -492,8 +641,17 @@ class Player {
       album: track.album ?? '',
     });
     navigator.mediaSession.metadata = metadata;
-    if (track.artUrl) this.#attachArtwork(metadata, async () => (await fetch(track.artUrl)).blob());
+    if (track.artUrl && !this.#showShapes) this.#attachArtwork(metadata, async () => (await fetch(track.artUrl)).blob());
     else if (track.symbolSeed) this.#attachArtwork(metadata, () => symbolOverlayPng(track.symbolSeed));
+  }
+
+  #showShapes = false;
+
+  /** Options ▸ Show Track Shapes Instead of Art: the OS overlay shows the symbol too. */
+  setShowShapes(showShapes) {
+    if (showShapes === this.#showShapes) return;
+    this.#showShapes = showShapes;
+    if (this.#state.current) this.#updateMediaSession(this.#state.current);
   }
 
   #artworkObjectUrl = null;
@@ -524,6 +682,23 @@ class Player {
 function symbolOverlayPng(seed) {
   const background = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#14110f';
   return symbolPng(seed, { size: 512, background });
+}
+
+function loadSetting(key, allowed) {
+  try {
+    const stored = localStorage.getItem(key);
+    return allowed.includes(stored) ? stored : allowed[0];
+  } catch {
+    return allowed[0];
+  }
+}
+
+function saveSetting(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Not worth surfacing; the setting just won't persist.
+  }
 }
 
 function loadVolume() {

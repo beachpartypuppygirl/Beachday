@@ -9,12 +9,12 @@ const SEEK_STEP_S = 5;
 /**
  * The bottom bar, laid out after the reference foobar2000 skin: now-playing
  * text on the left, round transport buttons centred, time and volume on the
- * right, and a full-width seek bar underneath.
- *
- * The playback-order (shuffle) button arrives with Phase 8.
+ * right, and a full-width seek bar underneath. Shuffle and repeat are small
+ * toggles either side of the round buttons: lit when on, and repeat cycles
+ * Off → All → One (marked "1").
  */
 export default function Transport() {
-  const { current: track, status, duration, volume, muted, error } = usePlayer();
+  const { current: track, status, duration, volume, muted, error, order, repeat } = usePlayer();
   const isPlaying = status === 'playing';
 
   return (
@@ -36,6 +36,13 @@ export default function Transport() {
         </div>
 
         <div className="transport__controls">
+          <ModeButton
+            label={order === 'shuffle' ? 'Shuffle: on' : 'Shuffle: off'}
+            on={order === 'shuffle'}
+            onClick={() => player.setOrder(order === 'shuffle' ? 'sequential' : 'shuffle')}
+          >
+            <path d="M1 4h2.5c1.6 0 2.4.7 3.3 2.2l1.4 2.4c.9 1.5 1.7 2.2 3.3 2.2H13M1 11h2.5c1.2 0 1.9-.4 2.6-1.3M8.2 5.3C8.9 4.4 9.6 4 10.8 4H13M11.2 2.2 13 4l-1.8 1.8M11.2 9 13 10.8l-1.8 1.8" />
+          </ModeButton>
           <TransportButton label="Previous" onClick={() => player.previous()}>
             <path d="M3 2h1.6v10H3zM12 2v10L5.5 7z" />
           </TransportButton>
@@ -52,6 +59,14 @@ export default function Transport() {
           <TransportButton label="Next" onClick={() => player.next()}>
             <path d="M9.4 2H11v10H9.4zM2 2v10l6.5-5z" />
           </TransportButton>
+          <ModeButton
+            label={`Repeat: ${repeat === 'one' ? 'this track' : repeat === 'all' ? 'all' : 'off'}`}
+            on={repeat !== 'off'}
+            badge={repeat === 'one' ? '1' : null}
+            onClick={() => player.setRepeat(REPEAT_NEXT[repeat])}
+          >
+            <path d="M3 6.5V5.5C3 4.4 3.9 3.5 5 3.5h7M10.3 1.8 12 3.5l-1.7 1.7M11 7.5v1c0 1.1-.9 2-2 2H2M3.7 12.2 2 10.5l1.7-1.7" />
+          </ModeButton>
         </div>
 
         <div className="transport__right">
@@ -62,6 +77,29 @@ export default function Transport() {
 
       <SeekBar duration={duration} disabled={!track || status === 'empty'} />
     </footer>
+  );
+}
+
+const REPEAT_NEXT = { off: 'all', all: 'one', one: 'off' };
+
+/** A playback-mode toggle (shuffle, repeat): an outline icon, lit when on. */
+function ModeButton({ label, on, badge = null, onClick, children }) {
+  return (
+    <button
+      className={`transport__mode${on ? ' transport__mode--on' : ''}`}
+      type="button"
+      title={label}
+      aria-label={label}
+      aria-pressed={on}
+      onClick={onClick}
+    >
+      <svg viewBox="0 0 14 14" aria-hidden="true">
+        <g fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+          {children}
+        </g>
+      </svg>
+      {badge && <span className="transport__mode-badge">{badge}</span>}
+    </button>
   );
 }
 

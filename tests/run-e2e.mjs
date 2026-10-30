@@ -73,6 +73,11 @@ const GROUPS = [
     label: 'e2e7',
     suites: [['phase 7', 'e2e/phase7.steps.mjs']],
   },
+  {
+    // Phase 8: shuffle, repeat, Stop After Current, link chains through editing and playback.
+    label: 'e2e8',
+    suites: [['phase 8', 'e2e/phase8.steps.mjs']],
+  },
 ];
 
 // E2E_ONLY=6 runs only the groups with a suite whose name contains "6".

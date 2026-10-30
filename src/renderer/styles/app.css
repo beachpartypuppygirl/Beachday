@@ -593,6 +593,47 @@ button {
   color: var(--text-muted);
 }
 
+/*
+ * Linked tracks (a chain): a rail down the row's left edge with a node on
+ * each track, so a chain reads as one piece. Half a rail at its ends.
+ */
+.track__chain {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 8px;
+  width: 2px;
+}
+
+.track__chain::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  bottom: 50%;
+  left: 0;
+  width: 2px;
+  background: var(--highlight);
+}
+
+.track--link-up .track__chain::before {
+  top: 0;
+}
+
+.track--link-down .track__chain::before {
+  bottom: 0;
+}
+
+.track__chain::after {
+  content: "";
+  position: absolute;
+  top: calc(50% - 3px);
+  left: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--highlight);
+}
+
 .track--current .track__number,
 .track--current .track__duration {
   color: var(--text-primary);
@@ -698,6 +739,42 @@ button {
 .transport__button:hover {
   background: var(--highlight);
   color: var(--accent-contrast);
+}
+
+.transport__mode {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin: 0 4px;
+  border-radius: 5px;
+  color: var(--text-muted);
+  transition: color var(--fast) var(--ease), background var(--fast) var(--ease);
+}
+
+.transport__mode svg {
+  width: 16px;
+  height: 16px;
+}
+
+.transport__mode:hover {
+  color: var(--text-primary);
+  background: var(--surface-hover);
+}
+
+.transport__mode--on,
+.transport__mode--on:hover {
+  color: var(--highlight);
+}
+
+.transport__mode-badge {
+  position: absolute;
+  right: 1px;
+  bottom: 0;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .transport__right {

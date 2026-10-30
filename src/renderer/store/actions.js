@@ -273,11 +273,13 @@ export function cutSelection() {
 export function paste() {
   const playlist = viewed();
   if (!playlist || !clipboard.length) return;
-  const items = clipboard.map(({ track, resolution }) => {
-    const id = `t_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
-    // Links never cross a paste: chains are rebuilt by Link (Phase 8).
-    return { track: { ...track, id, linkNext: null }, resolution };
-  });
+  // Pasted tracks get new ids. Links between pasted tracks come along (a
+  // copied chain pastes as a chain); links to anything else don't.
+  const ids = new Map(clipboard.map(({ track }) => [track.id, `t_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`]));
+  const items = clipboard.map(({ track, resolution }) => ({
+    track: { ...track, id: ids.get(track.id), linkNext: ids.get(track.linkNext) ?? null },
+    resolution,
+  }));
   const afterId = store.selectedIds(playlist).at(-1) ?? null;
   store.insertTracks(playlist.id, items, { afterId, label: 'Paste', select: true });
 }

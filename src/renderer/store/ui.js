@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { player } from '../audio/engine.js';
 
 /**
  * Transient UI state that isn't part of any playlist: which dialog is open,
@@ -35,6 +36,11 @@ let state = {
   pauseGifs: true,
   /** Options ▸ Pause GIFs When Playback Pauses: the art pane's GIF follows the music */
   pauseGifsWithPlayback: true,
+  /**
+   * Options ▸ Show Track Shapes Instead of Art: the art pane, group headers and
+   * the OS overlay show each track's generated symbol, whatever art it has (mirrors app config)
+   */
+  showShapes: false,
 };
 
 const NOTICE_MS = 5000;
@@ -65,8 +71,9 @@ export function notify(notice) {
 export const setRestoreTabs = (restoreTabs) => set({ restoreTabs });
 
 export async function loadPrefs() {
-  const { artPane, pauseGifs, pauseGifsWithPlayback } = await window.beachday.prefs.get();
-  set({ artPane, pauseGifs, pauseGifsWithPlayback });
+  const { artPane, pauseGifs, pauseGifsWithPlayback, showShapes } = await window.beachday.prefs.get();
+  set({ artPane, pauseGifs, pauseGifsWithPlayback, showShapes });
+  player.setShowShapes(showShapes);
 }
 
 /**
@@ -86,6 +93,12 @@ export function setPauseGifs(pauseGifs) {
 export function setPauseGifsWithPlayback(pauseGifsWithPlayback) {
   set({ pauseGifsWithPlayback });
   window.beachday.prefs.set({ pauseGifsWithPlayback });
+}
+
+export function setShowShapes(showShapes) {
+  set({ showShapes });
+  player.setShowShapes(showShapes);
+  window.beachday.prefs.set({ showShapes });
 }
 
 let scrollNonce = 0;

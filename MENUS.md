@@ -104,10 +104,10 @@ Lyrics Over Art shows the art alone, and Lyrics Only shows a "No lyrics found" m
 | Stop | | 2 |
 | Previous / Next | | 2 |
 | — | | |
-| Order ▸ Sequential / Shuffle | | 2 / 8 |
-| Repeat ▸ Off / All / One | | 8 |
+| Order ▸ Sequential / Shuffle (also the transport's shuffle toggle) | | 8 |
+| Repeat ▸ Off / All / One (also the transport's repeat toggle) | | 8 |
 | Reshuffle | | 8 |
-| Stop After Current | | ✦ |
+| Stop After Current | | 8 ✦ |
 | — | | |
 | Volume Up / Volume Down / Mute | | 2 |
 
@@ -140,8 +140,8 @@ Acts on the selected track(s). **The track list's right-click menu shows the sam
 | Adjust Gain (dB)… (capped at +12dB — PLAN.md §10) | | 7 |
 | Reset Gain (back to ReplayGain, or 0dB) | | 7 |
 | — | | |
-| Link Selected | Ctrl+L | 8 |
-| Unlink | Ctrl+Shift+L | 8 |
+| Link Selected (joins touched chains; moves tracks together) | Ctrl+L | 8 |
+| Unlink (the selected tracks leave their chains) | Ctrl+Shift+L | 8 |
 | Move to Group ▸ (every group, New Group…, By Tags (Automatic); pins `groupId`. With grouping off, just New Group…, which turns on Custom Groups Only) | | 7 |
 | — | | |
 | Fetch Lyrics | | 10 |
@@ -156,6 +156,7 @@ Acts on the selected track(s). **The track list's right-click menu shows the sam
 | Preferences… (one settings window) | — |
 | Fetch Lyrics Automatically (on/off) | 10 |
 | Folder Mappings… (`C:\Music` ↔ `/home/…/Music`; app-level, not per playlist) | 4 |
+| Show Track Shapes Instead of Art (on/off, default off; also in the art pane menu) | 8 ✦ |
 | Pause GIFs When Window Is Unfocused (on/off, default on) | 6 ✦ |
 | Pause GIFs When Playback Pauses (on/off, default on; the art pane's GIF) | 6 ✦ |
 
@@ -186,6 +187,7 @@ whatever is selected in the list. Left-click on the art still toggles playback.
 | Reset Art Pane Size | 6 |
 | Show Art Pane (unticking hides it) | 6 |
 | — | |
+| Show Track Shapes Instead of Art | 8 |
 | Pause GIFs When Playback Pauses | 6 |
 
 ---
@@ -222,12 +224,12 @@ Designed in `PLAN.md` §5 (2026-10-28). Menu effects:
 ## Implementation notes
 
 **Built in Phase 4** from the table in `src/renderer/menus/commands.js`; Phase 5 added the
-selection-based items, Phase 6 the art pane items, Phase 7 the metadata items. Live now: all of File (incl. Close / Next /
+selection-based items, Phase 6 the art pane items, Phase 7 the metadata items, Phase 8 playback order and links. Live now: all of File (incl. Close / Next /
 Previous Tab), all of Edit except Find, View (Show Art Pane, Reset Art Pane Size, Collapse/Expand
-All, Jump to Now Playing, Zoom), Playback (except Order/Repeat/Reshuffle/Stop After Current),
+All, Jump to Now Playing, Zoom), all of Playback,
 Playlist ▸ Properties…, Grouping (Off / By Album / By Artist / Custom Groups Only / Custom…), Edit Groups…, Storage and
-Relink, all of Track except Link / Unlink and Fetch Lyrics (Phase 8 / 10), Options ▸ Folder Mappings,
-Restore Tabs on Startup, Pause GIFs When Window Is Unfocused and Pause GIFs When Playback
+Relink, all of Track except Fetch Lyrics (Phase 10), Options ▸ Folder Mappings,
+Restore Tabs on Startup, Show Track Shapes Instead of Art, Pause GIFs When Window Is Unfocused and Pause GIFs When Playback
 Pauses, and Help. View ▸ Art Pane ▸
 (display modes) stays hidden until Phase 10 brings lyrics; until then Art Only is the only mode. Right-clicking a track opens the Track menu plus
 Cut / Copy / Paste / Remove; right-clicking a group header opens the group menu. Double-clicking
