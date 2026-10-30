@@ -52,3 +52,43 @@ assert.deepEqual(G.map((g) => g.artUrl), [url(A('c')), url(A('d')), url(A('g'))]
 G = buildLayout({ tracks: [T('q', 'Q', 'q')], grouping: PRESETS.album, meta: { cover: A('cover') } }, {}, new Set()).groups;
 assert.equal(G[0].artUrl, url(A('cover')), 'playlist cover before the block');
 console.log('PASS art resolution chain for group headers');
+
+// Pins, custom groups and per-group header overrides (Phase 7).
+const { applyGroupEdits, pinTracks, derivedKey, CUSTOM_PREFIX } = await import(new URL('../../src/renderer/store/grouping.js', import.meta.url));
+const names = (layout) => layout.rows.map((r) => (r.type === 'group' ? `[${r.group.mainName}]` : r.id));
+let pinned = pinTracks(tracks, PRESETS.album, ['b1'], derivedKey(PRESETS.album, tracks[0]));
+assert.deepEqual(names(buildLayout({ tracks: pinned, grouping: PRESETS.album }, {}, new Set())), ['[Arceus]', 'a1', 'b1', 'a2', '[Unknown Album]', 'w1'], 'a pinned track joins the group, in playlist order');
+assert.equal(pinTracks(pinned, PRESETS.album, ['a1'], derivedKey(PRESETS.album, tracks[0])), pinned, 'pinning a track to its own group changes nothing');
+L = buildLayout({ tracks: pinned, grouping: PRESETS.album }, {}, new Set());
+assert.deepEqual(L.groups[0].subNames[0], 'Pokemon', 'header fields come from a track that belongs by its tags');
+assert.deepEqual(names(buildLayout({ tracks: pinned, grouping: PRESETS.artist }, {}, new Set())).filter((n) => n.startsWith('[')), ['[Pokemon]', '[Splatoon]', '[dmg]'], 'a pin to a group the template no longer makes falls back');
+console.log('PASS pinning tracks to groups');
+
+const key = CUSTOM_PREFIX + 'g_test';
+const custom = { tracks: pinTracks(tracks, PRESETS.album, ['w1', 'a2'], key), grouping: PRESETS.album, groups: [{ key, custom: true, mainName: 'Favourites' }] };
+L = buildLayout(custom, {}, new Set());
+assert.deepEqual(names(L), ['[Arceus]', 'a1', '[Octo]', 'b1', '[Favourites]', 'a2', 'w1'], 'a custom group holds its pinned tracks');
+assert.equal(L.groups[2].custom, true);
+assert.deepEqual(names(buildLayout({ ...custom, grouping: PRESETS.artist }, {}, new Set())).slice(-3), ['[Favourites]', 'a2', 'w1'], 'custom groups survive a template change');
+assert.deepEqual(names(buildLayout({ ...custom, groups: [] }, {}, new Set())).filter((n) => n.startsWith('[')), ['[Arceus]', '[Octo]', '[Unknown Album]'], 'a pin to a custom group that is gone falls back');
+console.log('PASS custom groups');
+
+let edited = applyGroupEdits(custom, new Map([[L.groups[0].key, { mainName: '%album% (PLA)', subNames: ['', 'Switch'], description: 'Hisui!' }]]));
+L = buildLayout(edited, {}, new Set());
+assert.equal(L.groups[0].mainName, 'Arceus (PLA)', 'main name override is a template');
+assert.deepEqual(L.groups[0].subNames, ['Pokemon', 'Switch'], 'an empty override line keeps the grouping line');
+assert.equal(L.groups[0].description, 'Hisui!');
+assert.equal(applyGroupEdits(edited, new Map([[L.groups[0].key, { description: 'Hisui!' }]])), edited, 'no-op edit returns the same doc');
+const cleared = applyGroupEdits(edited, new Map([[L.groups[0].key, { mainName: '', subNames: ['', ''], description: '' }]]));
+assert.deepEqual(cleared.groups.find((g) => g.key === L.groups[0].key), { key: L.groups[0].key }, 'clearing removes the fields');
+const dissolved = applyGroupEdits(edited, new Map([[key, { dissolve: true }]]));
+assert.ok(!dissolved.groups.some((g) => g.key === key) && dissolved.tracks.every((t) => !t.groupId), 'dissolving unpins its tracks and drops the group');
+const hostile = buildLayout({ tracks, grouping: PRESETS.album, groups: [{ key: L.groups[0].key, mainName: 42, subNames: 'x' }, { nokey: true }] }, {}, new Set());
+assert.equal(hostile.groups[0].mainName, 'Arceus', 'malformed group entries from a .bday are ignored');
+console.log('PASS group header overrides, descriptions, dissolve');
+
+// Custom Groups Only: tags group nothing; everything not in a custom group shares one group.
+const manual = { tracks: pinTracks(tracks, PRESETS.manual, ['b1'], key), grouping: PRESETS.manual, groups: [{ key, custom: true, mainName: 'Mine' }] };
+assert.deepEqual(names(buildLayout(manual, {}, new Set())), ['[Ungrouped Tracks]', 'a1', 'a2', 'w1', '[Mine]', 'b1']);
+assert.deepEqual(buildLayout(manual, {}, new Set()).groups[1].subNames, ['1 Track | Time: 1:00'], 'custom groups take the mode’s count line');
+console.log('PASS Custom Groups Only');

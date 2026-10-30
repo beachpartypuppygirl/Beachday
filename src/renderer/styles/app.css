@@ -119,6 +119,9 @@ button {
   left: 0;
   z-index: 20;
   min-width: 230px;
+  /* Menus grow to fit their labels; past this, long labels wrap. */
+  max-width: 340px;
+  width: max-content;
   margin: 0;
   padding: 4px;
   list-style: none;
@@ -131,6 +134,9 @@ button {
 .menu--nested {
   top: -5px;
   left: calc(100% + 2px);
+  /* Move to Group can list dozens of groups. */
+  max-height: 60vh;
+  overflow-y: auto;
 }
 
 .menu__entry {
@@ -160,6 +166,11 @@ button {
 .menu__item--disabled:hover {
   background: none;
   color: var(--text-muted);
+}
+
+.menu__label {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .menu__check {
@@ -351,6 +362,7 @@ button {
 
 .tracklist__heading {
   display: flex;
+  flex: 1;
   flex-direction: column;
   min-width: 0;
 }
@@ -362,6 +374,56 @@ button {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.tracklist__cover {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 3px;
+}
+
+.tracklist__description {
+  margin-top: 4px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.tracklist__description-text {
+  margin: 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+/* Up to three lines; "more" shows the rest. Expanded, a very long one scrolls. */
+.tracklist__description-text--clamped {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.tracklist__description-text:not(.tracklist__description-text--clamped) {
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.tracklist__description-toggle {
+  padding: 0;
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.tracklist__description-toggle:hover {
+  text-decoration: underline;
+}
+
+.tracklist__author {
+  font-weight: 400;
+  color: var(--text-secondary);
 }
 
 .tracklist__dirty {
@@ -541,6 +603,12 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.track__rename {
+  height: 19px;
+  padding: 0 5px;
+  font-size: 13px;
 }
 
 .track__artist {
@@ -878,6 +946,236 @@ button {
   flex: 1;
 }
 
+.modal__section {
+  margin: 16px 0 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.modal__panel--groups {
+  width: min(860px, 100%);
+}
+
+/* Forms in dialogs: a label above each field. */
+.form {
+  display: grid;
+  gap: 10px;
+}
+
+.form__label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.form__textarea {
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.form__mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.form__note {
+  margin: 12px 0 0;
+  font-size: 12px;
+}
+
+/* Playlist properties: fields beside the cover. */
+.meta {
+  display: grid;
+  grid-template-columns: 1fr 180px;
+  gap: 20px;
+}
+
+.meta__fields {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.meta__cover {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+}
+
+.artpick {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.artpick--small {
+  width: 56px;
+}
+
+.artpick__image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.artpick__none {
+  padding: 4px;
+  font-size: 11.5px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.artpick__actions,
+.artpick__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Gain: a slider and the exact value. */
+.gain {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.gain__slider {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.gain__value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.gain__field {
+  width: 9ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.tokens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 10px 0 0;
+}
+
+.tokens__token {
+  padding: 1px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface-raised);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.tokens__token:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+/* A group header drawn as a preview, outside the list. */
+.grouppreview {
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.grouppreview > .group {
+  min-height: 74px;
+}
+
+.grouppreview > .group:first-child {
+  border-top: none;
+}
+
+.grouppreview .group__toggle {
+  visibility: hidden;
+}
+
+/* Edit Groups: the groups on the left, the chosen one's fields on the right. */
+.groupedit {
+  display: grid;
+  grid-template-columns: 230px 1fr;
+  gap: 16px;
+  min-height: 0;
+}
+
+.groupedit__list {
+  max-height: 60vh;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.groupedit__item {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px;
+  font-size: 12.5px;
+  cursor: default;
+}
+
+.groupedit__item:hover {
+  background: var(--surface-hover);
+}
+
+.groupedit__item--selected,
+.groupedit__item--selected:hover {
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+}
+
+.groupedit__names {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.groupedit__name,
+.groupedit__sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.groupedit__sub {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.groupedit__count {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.groupedit__form {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  min-width: 0;
+}
+
 .relink__list,
 .mappings__list {
   margin: 0;
@@ -1065,6 +1363,30 @@ kbd {
 .group__detail {
   font-size: 11.5px;
   color: var(--text-secondary);
+}
+
+.group--described {
+  align-items: flex-start;
+  min-height: 74px;
+  padding-bottom: 8px;
+}
+
+.group__description {
+  display: -webkit-box;
+  margin-top: 3px;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+}
+
+.group--described .group__year {
+  align-self: flex-start;
+  margin-top: 2px;
 }
 
 .group__year {

@@ -2,6 +2,7 @@ import { player } from '../audio/engine.js';
 import * as store from '../store/playlists.js';
 import * as ui from '../store/ui.js';
 import * as actions from '../store/actions.js';
+import { seedGainDb, trackGainDb } from '../store/gain.js';
 
 /**
  * Every menu item and keyboard shortcut, from one table (MENUS.md
@@ -29,9 +30,11 @@ export function getContext() {
   const current = player.getState().current;
   // The playing track, while it's still in its playlist (not removed mid-play).
   const playingTrack = current && playlists[playingId]?.doc.tracks.find((track) => track.id === current.id);
+  const selected = playlist?.loaded ? store.selectedIds(playlist) : [];
   return {
     playlist,
-    selected: playlist?.loaded ? store.selectedIds(playlist) : [],
+    selected,
+    selectedGroup: selectedGroup(playlist, selected),
     tabCount: store.getState().order.length,
     playerState: player.getState(),
     recentFiles: ui.getState().recentFiles,
@@ -44,6 +47,14 @@ export function getContext() {
   };
 }
 
+/** The group holding the whole selection, in a grouped view (right-clicking a header selects its tracks). */
+function selectedGroup(playlist, selected) {
+  if (!playlist?.loaded || !playlist.doc.grouping || !selected.length) return null;
+  const { groupOf } = store.layoutOf(playlist);
+  const group = groupOf.get(selected[0]);
+  return selected.every((id) => groupOf.get(id) === group) ? group : null;
+}
+
 const idle = (ctx) => !ctx.busy;
 /** Idle, and the viewed tab is loaded (a restored tab may not be yet). */
 const ready = (ctx) => idle(ctx) && Boolean(ctx.playlist?.loaded);
@@ -52,6 +63,10 @@ const hasSelection = (ctx) => ready(ctx) && ctx.selected.length > 0;
 const oneFound = (ctx) =>
   ready(ctx) && ctx.selected.length === 1 && ctx.playlist.resolution[ctx.selected[0]]?.status === 'ok';
 const grouped = (ctx) => ready(ctx) && Boolean(ctx.playlist.doc.grouping);
+const selectedTracks = (ctx) => {
+  const ids = new Set(ctx.selected);
+  return ctx.playlist.doc.tracks.filter((track) => ids.has(track.id));
+};
 
 export const COMMANDS = {
   // --- File ---
@@ -205,6 +220,24 @@ export const COMMANDS = {
     enabled: ready,
     run: (ctx) => store.setGrouping(ctx.playlist.id, 'artist'),
   },
+  'playlist.grouping.manual': {
+    label: 'Custom Groups Only',
+    checked: (ctx) => ctx.playlist?.doc.grouping?.preset === 'manual',
+    enabled: ready,
+    run: (ctx) => store.setGrouping(ctx.playlist.id, 'manual'),
+  },
+  'playlist.grouping.custom': {
+    label: 'Custom…',
+    checked: (ctx) => ctx.playlist?.doc.grouping?.preset === 'custom',
+    enabled: ready,
+    run: () => ui.openDialog('grouping'),
+  },
+  'playlist.properties': { label: 'Properties…', enabled: ready, run: () => ui.openDialog('playlistProperties') },
+  'playlist.editGroups': {
+    label: 'Edit Groups…',
+    enabled: (ctx) => grouped(ctx) && ctx.playlist.doc.tracks.length > 0,
+    run: (ctx) => ui.openDialog('groups', { key: ctx.selectedGroup?.key ?? null }),
+  },
   'playlist.storage.reference': {
     label: 'Reference',
     checked: (ctx) => ctx.playlist?.storage === 'reference',
@@ -224,6 +257,42 @@ export const COMMANDS = {
   },
 
   // --- Track (acts on the selection) ---
+  'track.rename': {
+    label: 'Rename…',
+    shortcut: 'F2',
+    enabled: (ctx) => ready(ctx) && ctx.selected.length === 1,
+    run: (ctx) => {
+      store.revealTrack(ctx.playlist.id, ctx.selected[0]);
+      ui.requestRename(ctx.playlist.id, ctx.selected[0]);
+    },
+  },
+  'track.gain': {
+    label: (ctx) => (ctx.selected.length > 1 ? `Adjust Gain for ${ctx.selected.length} Tracks…` : 'Adjust Gain…'),
+    enabled: hasSelection,
+    run: (ctx) => ui.openDialog('gain', { playlistId: ctx.playlist.id, ids: ctx.selected }),
+  },
+  'track.resetGain': {
+    label: 'Reset Gain',
+    enabled: (ctx) => hasSelection(ctx) && selectedTracks(ctx).some((track) => trackGainDb(track) !== seedGainDb(track)),
+    run: (ctx) => store.setTrackGain(ctx.playlist.id, ctx.selected, null),
+  },
+  'track.newGroup': {
+    label: 'New Group…',
+    enabled: hasSelection,
+    run: actions.newGroupFromSelection,
+  },
+  'track.ungroup': {
+    label: 'By Tags (Automatic)',
+    checked: (ctx) => ctx.selected.length > 0 && selectedTracks(ctx).every((track) => !track.groupId),
+    enabled: (ctx) => grouped(ctx) && selectedTracks(ctx).some((track) => track.groupId),
+    run: (ctx) => store.moveToGroup(ctx.playlist.id, ctx.selected, null),
+  },
+  'track.resetOverrides': {
+    label: 'Reset All Overrides',
+    enabled: (ctx) =>
+      hasSelection(ctx) && selectedTracks(ctx).some((track) => Object.keys(track.overrides).length > 0 || track.groupId),
+    run: (ctx) => store.resetOverrides(ctx.playlist.id, ctx.selected),
+  },
   'track.setArt': {
     label: (ctx) => (ctx.selected.length > 1 ? `Set Custom Art for ${ctx.selected.length} Tracks…` : 'Set Custom Art…'),
     enabled: hasSelection,
@@ -260,6 +329,24 @@ export const COMMANDS = {
     run: (ctx) => actions.clearCustomArt(ctx.nowPlaying.playlist.id, [ctx.nowPlaying.track.id]),
   },
 
+  // --- Group header (right-click; acts on the group whose tracks are selected) ---
+  'group.edit': {
+    label: 'Edit Group…',
+    enabled: (ctx) => ready(ctx) && Boolean(ctx.selectedGroup),
+    run: (ctx) => ui.openDialog('groups', { key: ctx.selectedGroup.key }),
+  },
+  'group.setArt': {
+    label: 'Set Group Art…',
+    enabled: (ctx) => ready(ctx) && Boolean(ctx.selectedGroup),
+    run: (ctx) => actions.setGroupArt(ctx.playlist.id, ctx.selectedGroup.key),
+  },
+  'group.clearArt': {
+    label: 'Clear Group Art',
+    enabled: (ctx) =>
+      ready(ctx) && Boolean(ctx.selectedGroup) && ctx.playlist.doc.groups.some((g) => g.key === ctx.selectedGroup.key && g.art),
+    run: (ctx) => actions.clearGroupArt(ctx.playlist.id, ctx.selectedGroup.key),
+  },
+
   // --- Options ---
   'options.folderMappings': { label: 'Folder Mappings…', run: () => ui.openDialog('mappings') },
   'options.restoreTabs': {
@@ -285,8 +372,61 @@ export const COMMANDS = {
 
 const fileName = (filePath) => filePath.split(/[\\/]/).pop();
 
+// How many groups Move to Group lists before pointing at Edit Groups instead.
+const MOVE_TO_GROUP_LIMIT = 40;
+
+/** Track ▸ Move to Group ▸: every group in display order, then New Group… and unpinning. */
+const MOVE_TO_GROUP = {
+  label: 'Move to Group',
+  items: (ctx) => {
+    if (!hasSelection(ctx)) return [];
+    // Grouping off: there are no groups yet, but a new one can be made.
+    if (!grouped(ctx)) return ['track.newGroup'];
+    const { groups } = store.layoutOf(ctx.playlist);
+    const listed = groups.slice(0, MOVE_TO_GROUP_LIMIT).map((group) => ({
+      label: `${group.mainName}${group.custom ? '' : group.subNames[0] ? ` — ${group.subNames[0]}` : ''}`,
+      checked: () => ctx.selectedGroup === group,
+      enabled: (inner) => !inner.busy,
+      run: () => store.moveToGroup(ctx.playlist.id, ctx.selected, group.key),
+    }));
+    const more = groups.length > MOVE_TO_GROUP_LIMIT ? [{ label: `${groups.length - MOVE_TO_GROUP_LIMIT} more…`, enabled: () => false }] : [];
+    return [...listed, ...more, '-', 'track.newGroup', 'track.ungroup'];
+  },
+};
+
 /** The Track menu, also the track list's right-click menu (MENUS.md). */
-export const TRACK_ITEMS = ['track.setArt', 'track.clearArt', '-', 'track.showInFolder', 'track.properties'];
+export const TRACK_ITEMS = [
+  'track.rename',
+  'track.setArt',
+  'track.clearArt',
+  'track.gain',
+  'track.resetGain',
+  '-',
+  MOVE_TO_GROUP,
+  '-',
+  'track.showInFolder',
+  'track.properties',
+  '-',
+  'track.resetOverrides',
+];
+
+/** Right-click on a group header: the group itself, then the selection (its tracks) as usual. */
+export const GROUP_CONTEXT_ITEMS = [
+  'group.edit',
+  'group.setArt',
+  'group.clearArt',
+  '-',
+  'view.collapseAll',
+  'view.expandAll',
+  '-',
+  'track.gain',
+  'track.resetGain',
+  MOVE_TO_GROUP,
+  '-',
+  'edit.cut',
+  'edit.copy',
+  'edit.remove',
+];
 
 /** Right-click on the art pane: art for the playing track, and the pane itself. */
 export const ART_CONTEXT_ITEMS = [
@@ -373,7 +513,19 @@ export const MENUS = [
   {
     label: 'Playlist',
     items: [
-      { label: 'Grouping', items: ['playlist.grouping.off', 'playlist.grouping.album', 'playlist.grouping.artist'] },
+      'playlist.properties',
+      '-',
+      {
+        label: 'Grouping',
+        items: [
+          'playlist.grouping.off',
+          'playlist.grouping.album',
+          'playlist.grouping.artist',
+          'playlist.grouping.manual',
+          'playlist.grouping.custom',
+        ],
+      },
+      'playlist.editGroups',
       '-',
       { label: 'Storage', items: ['playlist.storage.reference', 'playlist.storage.bundled'] },
       'playlist.relink',

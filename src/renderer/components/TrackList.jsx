@@ -5,7 +5,8 @@ import * as store from '../store/playlists.js';
 import * as ui from '../store/ui.js';
 import * as actions from '../store/actions.js';
 import { formatTime } from '../format.js';
-import { TRACK_CONTEXT_ITEMS } from '../menus/commands.js';
+import { GROUP_CONTEXT_ITEMS, TRACK_CONTEXT_ITEMS } from '../menus/commands.js';
+import { artRefUrl } from '../store/art.js';
 import ContextMenu from './ContextMenu.jsx';
 import TabStrip from './TabStrip.jsx';
 import ArtImage from './ArtImage.jsx';
@@ -22,7 +23,8 @@ import { symbolUrl } from '../symbols.js';
  *   arrows, Home/End, PageUp/PageDown  move (Shift extends); Enter plays
  *   double-click                       play (a group header plays its first track)
  *   drag                               reorder tracks, or a group by its header
- *   right-click                        Track menu + clipboard
+ *   right-click                        Track menu + clipboard (a header: its group's menu)
+ *   F2                                 rename the selected track in place
  *
  * Drag is hand-rolled on pointer events rather than HTML5 drag-and-drop,
  * which fights virtualization (dragged rows unmount as they scroll away).
@@ -30,6 +32,12 @@ import { symbolUrl } from '../symbols.js';
 
 const TRACK_HEIGHT = 22;
 const GROUP_HEIGHT = 74;
+// A first guess at a described header's height, until it's measured.
+const DESCRIBED_GROUP_ESTIMATE = GROUP_HEIGHT + 32;
+
+const rowHeight = (row) =>
+  row.type === 'track' ? TRACK_HEIGHT : row.group.description ? DESCRIBED_GROUP_ESTIMATE : GROUP_HEIGHT;
+const rowKey = (row) => (row.type === 'track' ? row.id : `g${row.group.description ? 'd' : ''}:${row.key}`);
 const DRAG_THRESHOLD_PX = 4;
 const AUTOSCROLL_EDGE_PX = 36;
 const AUTOSCROLL_MAX_PX = 18;
@@ -83,11 +91,12 @@ function UnloadedPlaylist({ playlist }) {
 function LoadedPlaylist({ playlist }) {
   const { playingId } = useSyncExternalStore(store.subscribe, store.getState);
   const { current, status } = usePlayer();
-  const { busy, notice, scrollRequest } = ui.useUi();
+  const { busy, notice, scrollRequest, renameRequest } = ui.useUi();
   const [importProgress, setImportProgress] = useState(null);
   const [fileDragOver, setFileDragOver] = useState(false);
   const [drag, setDrag] = useState(null);
   const [contextMenu, setContextMenu] = useState(null);
+  const [renamingId, setRenamingId] = useState(null);
   const scrollRef = useRef(null);
   const pressRef = useRef(null);
 
@@ -98,28 +107,29 @@ function LoadedPlaylist({ playlist }) {
   const tracksById = useMemo(() => new Map(playlist.doc.tracks.map((t) => [t.id, t])), [playlist.doc.tracks]);
   const playingTrackId = playingId === playlist.id && status !== 'empty' ? current?.id : null;
 
-  // Row geometry: fixed heights, so offsets are a running sum.
-  const starts = useMemo(() => {
-    const result = new Array(rows.length + 1);
-    result[0] = 0;
-    for (let i = 0; i < rows.length; i++) {
-      result[i + 1] = result[i] + (rows[i].type === 'group' ? GROUP_HEIGHT : TRACK_HEIGHT);
-    }
-    return result;
-  }, [rows]);
   const rowIndexById = useMemo(
     () => new Map(rows.map((row, i) => [row.type === 'group' ? `g:${row.key}` : row.id, i])),
     [rows]
   );
 
+  // Rows have fixed heights, except a group header with a description, which
+  // is measured once on screen (its text wraps). Such a header gets its own
+  // key, so adding or removing a description never reuses a stale size.
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: useCallback((i) => starts[i + 1] - starts[i], [starts]),
-    getItemKey: useCallback((i) => (rows[i].type === 'group' ? `g:${rows[i].key}` : rows[i].id), [rows]),
+    estimateSize: useCallback((i) => rowHeight(rows[i]), [rows]),
+    getItemKey: useCallback((i) => rowKey(rows[i]), [rows]),
     overscan: 16,
   });
-  useLayoutEffect(() => virtualizer.measure(), [starts, virtualizer]);
+
+  // Row geometry from the virtualizer: start offsets, plus the total at the end.
+  const measurements = virtualizer.getMeasurements();
+  const starts = useMemo(() => {
+    const result = measurements.map((item) => item.start);
+    result.push(measurements.at(-1)?.end ?? 0);
+    return result;
+  }, [measurements]);
 
   // Per-tab scroll memory.
   useLayoutEffect(() => {
@@ -142,6 +152,22 @@ function LoadedPlaylist({ playlist }) {
     const index = rowIndexById.get(scrollRequest.trackId);
     if (index !== undefined) virtualizer.scrollToIndex(index, { align: 'center' });
   }, [scrollRequest, playlist.id, rowIndexById, virtualizer]);
+
+  // Track ▸ Rename (F2): bring the row on screen and edit its title there.
+  useEffect(() => {
+    if (renameRequest?.playlistId !== playlist.id) return;
+    ui.clearRename();
+    const index = rowIndexById.get(renameRequest.trackId);
+    if (index === undefined) return;
+    virtualizer.scrollToIndex(index, { align: 'auto' });
+    setRenamingId(renameRequest.trackId);
+  }, [renameRequest, playlist.id, rowIndexById, virtualizer]);
+
+  const finishRename = (trackId, title) => {
+    setRenamingId(null);
+    if (title !== null) store.renameTrack(playlist.id, trackId, title);
+    scrollRef.current?.focus();
+  };
 
   // --- Selection -------------------------------------------------------------
 
@@ -217,27 +243,31 @@ function LoadedPlaylist({ playlist }) {
         : { indicatorY: starts[i + 1], apply: move({ afterId: row.id }) };
     }
 
-    // Grouped: tracks stay in their own group — their tags decide it, and a
-    // track dropped elsewhere would jump straight back. Pinning a track to
-    // another group is Track ▸ Move to Group (Phase 7).
+    // Grouped: a track's tags decide its group, so a dropped track would jump
+    // straight back anywhere else. Except a custom group: dropping there moves
+    // the tracks into it (pins them). Track ▸ Move to Group covers the rest.
     const home = layout.groupOf.get(ids[0]);
-    if (!ids.every((id) => layout.groupOf.get(id) === home)) return null;
-    const homeHeader = rowIndexById.get(`g:${home.key}`);
-    if (row.type === 'track' && row.group === home) {
+    const sameHome = ids.every((id) => layout.groupOf.get(id) === home);
+    const accepts = (group) => group.custom || (sameHome && group === home);
+    const into = (group, at) =>
+      sameHome && group === home ? move(at) : () => store.dropIntoGroup(playlist.id, ids, group.key, at);
+
+    if (row.type === 'track') {
+      if (!accepts(row.group)) return null;
       return upper
-        ? { indicatorY: starts[i], apply: move({ beforeId: row.id }) }
-        : { indicatorY: starts[i + 1], apply: move({ afterId: row.id }) };
+        ? { indicatorY: starts[i], apply: into(row.group, { beforeId: row.id }) }
+        : { indicatorY: starts[i + 1], apply: into(row.group, { afterId: row.id }) };
     }
-    if (row.type === 'group' && row.group === home && !home.collapsed) {
-      return { indicatorY: starts[homeHeader + 1], apply: move({ beforeId: home.trackIds[0] }) };
+    // The top half of a header means "the end of the group above".
+    const above = layout.groups[layout.groups.indexOf(row.group) - 1];
+    if (upper && above && accepts(above)) {
+      const lastOther = [...above.trackIds].reverse().find((id) => !ids.includes(id));
+      if (lastOther) return { indicatorY: starts[i], apply: into(above, { afterId: lastOther }) };
     }
-    // The top half of the next group's header means "end of my group".
-    const nextHeader = homeHeader + 1 + (home.collapsed ? 0 : home.trackIds.length);
-    if (row.type === 'group' && i === nextHeader && upper) {
-      const lastOther = [...home.trackIds].reverse().find((id) => !ids.includes(id));
-      return lastOther ? { indicatorY: starts[i], apply: move({ afterId: lastOther }) } : null;
-    }
-    return null;
+    // Otherwise, the start of this group.
+    const firstOther = row.group.trackIds.find((id) => !ids.includes(id));
+    if (!accepts(row.group) || !firstOther) return null;
+    return { indicatorY: starts[i + 1], apply: into(row.group, { beforeId: firstOther }) };
   };
 
   const contentY = (clientY) => {
@@ -382,6 +412,8 @@ function LoadedPlaylist({ playlist }) {
   // --- Render ----------------------------------------------------------------
 
   const tracks = playlist.doc.tracks;
+  const { meta } = playlist.doc;
+  const coverUrl = artRefUrl(meta.cover);
   const totalDuration = tracks.reduce((sum, track) => sum + (track.tags.duration ?? 0), 0);
   const missing = store.missingCount(playlist);
   let statusLine = `${tracks.length} ${tracks.length === 1 ? 'track' : 'tracks'}`;
@@ -394,16 +426,23 @@ function LoadedPlaylist({ playlist }) {
   return (
     <>
       <header className="tracklist__header">
-        <div className="tracklist__heading">
-          <span className="tracklist__name" title={playlist.filePath ?? 'Not saved yet'}>
+        {coverUrl && <ArtImage key={coverUrl} className="tracklist__cover" src={coverUrl} fallback={null} />}
+        <div
+          className="tracklist__heading"
+          title={playlist.filePath ?? 'Not saved yet'}
+          onDoubleClick={() => ui.openDialog('playlistProperties')}
+        >
+          <span className="tracklist__name">
             {store.playlistName(playlist)}
             {store.isDirty(playlist) && (
               <span className="tracklist__dirty" title="Unsaved changes">
                 {' '}•
               </span>
             )}
+            {meta.author && <span className="tracklist__author"> by {meta.author}</span>}
           </span>
           <span className="tracklist__totals">{statusLine}</span>
+          {meta.description && <Description key={playlist.id} text={meta.description} />}
         </div>
         {notice ? (
           <span className="tracklist__notice">{notice}</span>
@@ -452,16 +491,24 @@ function LoadedPlaylist({ playlist }) {
               const row = rows[item.index];
               const style = { transform: `translateY(${item.start}px)`, height: item.size };
               if (row.type === 'group') {
+                const described = Boolean(row.group.description);
                 return (
                   <GroupHeader
                     key={item.key}
                     group={row.group}
-                    style={style}
+                    style={described ? { transform: style.transform } : style}
+                    measureRef={described ? virtualizer.measureElement : undefined}
+                    index={item.index}
                     selected={row.group.trackIds.every((id) => selection.has(id))}
                     playing={Boolean(playingTrackId) && row.group.trackIds.includes(playingTrackId)}
                     onPointerDown={(event) => onGroupPointerDown(event, row.group)}
                     onDoubleClick={() => store.play(playlist.id, row.group.trackIds[0])}
                     onToggle={() => store.toggleCollapsed(playlist.id, row.group.key)}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      if (!row.group.trackIds.every((id) => selection.has(id))) clickGroup(event, row.group);
+                      setContextMenu({ x: event.clientX, y: event.clientY, items: GROUP_CONTEXT_ITEMS });
+                    }}
                   />
                 );
               }
@@ -491,11 +538,17 @@ function LoadedPlaylist({ playlist }) {
                   onContextMenu={(event) => {
                     event.preventDefault();
                     if (!selection.has(row.id)) select([row.id], row.id);
-                    setContextMenu({ x: event.clientX, y: event.clientY });
+                    setContextMenu({ x: event.clientX, y: event.clientY, items: TRACK_CONTEXT_ITEMS });
                   }}
                 >
                   <span className="track__number">{row.number}</span>
-                  <span className="track__title">{track.overrides.title || track.tags.title}</span>
+                  {renamingId === row.id ? (
+                    <RenameField track={track} onDone={(title) => finishRename(row.id, title)} />
+                  ) : (
+                    <span className={`track__title${track.overrides.title ? ' track__title--renamed' : ''}`}>
+                      {track.overrides.title || track.tags.title}
+                    </span>
+                  )}
                   {(!grouped || isMissing) && (
                     <span className="track__artist">{isMissing ? 'missing' : track.tags.artist}</span>
                   )}
@@ -517,20 +570,101 @@ function LoadedPlaylist({ playlist }) {
           {drag.label}
         </div>
       )}
-      {contextMenu && <ContextMenu at={contextMenu} items={TRACK_CONTEXT_ITEMS} onClose={() => setContextMenu(null)} />}
+      {contextMenu && <ContextMenu at={contextMenu} items={contextMenu.items} onClose={() => setContextMenu(null)} />}
     </>
   );
 }
 
-function GroupHeader({ group, style, selected, playing, onPointerDown, onDoubleClick, onToggle }) {
+/**
+ * The playlist's description under its name: a few lines, with a toggle to
+ * show the rest when it's longer than that.
+ */
+function Description({ text }) {
+  const ref = useRef(null);
+  const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+
+  useLayoutEffect(() => {
+    const element = ref.current;
+    const measure = () => !expanded && setOverflows(element.scrollHeight > element.clientHeight + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [text, expanded]);
+
+  return (
+    <div className="tracklist__description">
+      <p ref={ref} className={`tracklist__description-text${expanded ? '' : ' tracklist__description-text--clamped'}`}>
+        {text}
+      </p>
+      {(overflows || expanded) && (
+        <button
+          className="tracklist__description-toggle"
+          type="button"
+          onDoubleClick={(event) => event.stopPropagation()}
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded ? 'less' : 'more'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The title of the row being renamed, as a field. Enter or leaving the field
+ * keeps the name; Escape drops it. Clearing it goes back to the tag title.
+ * Keys and presses stay inside, so the list's own handling doesn't see them.
+ */
+function RenameField({ track, onDone }) {
+  const ref = useRef(null);
+  const done = useRef(false);
+  const finish = (title) => {
+    if (done.current) return;
+    done.current = true;
+    onDone(title);
+  };
+  useEffect(() => {
+    ref.current.focus();
+    ref.current.select();
+  }, []);
+  return (
+    <input
+      ref={ref}
+      className="field track__rename"
+      defaultValue={track.overrides.title || track.tags.title}
+      placeholder={track.tags.title}
+      aria-label="Track name in this playlist"
+      spellCheck={false}
+      onPointerDown={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        if (event.key === 'Enter') finish(event.currentTarget.value);
+        else if (event.key === 'Escape') finish(null);
+      }}
+      onBlur={(event) => finish(event.currentTarget.value)}
+    />
+  );
+}
+
+/**
+ * A group's header row. Also drawn, static, as the live preview in the group
+ * and grouping editors (Dialogs.jsx).
+ */
+export function GroupHeader({ group, style, measureRef, index, selected, playing, onPointerDown, onDoubleClick, onToggle, onContextMenu }) {
   // The last step of the art resolution chain (store/art.js): a generated symbol.
   const block = <img className="group__art group__art--generated" src={symbolUrl(group.symbolSeed)} alt="" draggable={false} />;
   return (
     <div
-      className={`group${selected ? ' group--selected' : ''}${playing ? ' group--playing' : ''}${group.collapsed ? ' group--collapsed' : ''}`}
+      className={`group${selected ? ' group--selected' : ''}${playing ? ' group--playing' : ''}${group.collapsed ? ' group--collapsed' : ''}${group.description ? ' group--described' : ''}`}
       style={style}
+      ref={measureRef}
+      data-index={index}
       onPointerDown={onPointerDown}
       onDoubleClick={onDoubleClick}
+      onContextMenu={onContextMenu}
     >
       <button
         className="group__toggle"
@@ -551,6 +685,11 @@ function GroupHeader({ group, style, selected, playing, onPointerDown, onDoubleC
             {line}
           </span>
         ))}
+        {group.description && (
+          <span className="group__description" title={group.description}>
+            {group.description}
+          </span>
+        )}
       </div>
       {group.year && <span className="group__year">{group.year}</span>}
     </div>

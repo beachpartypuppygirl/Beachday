@@ -89,9 +89,18 @@ class Deck {
     this.trackId = track.id;
     this.url = track.url;
     this.loadId += 1;
-    this.gain.gain.value = dbToGain(track.gainDb ?? 0);
+    this.gainDb = track.gainDb ?? 0;
+    this.gain.gain.value = dbToGain(this.gainDb);
     this.element.src = track.url;
     this.element.load();
+  }
+
+  /** Change the gain of what's loaded, mid-play: ramped, so there's no click. */
+  setGain(db) {
+    this.gainDb = db;
+    const { context } = this.gain;
+    this.gain.gain.cancelScheduledValues(context.currentTime);
+    this.gain.gain.setTargetAtTime(dbToGain(db), context.currentTime, VOLUME_SMOOTHING_S);
   }
 
   clear() {
@@ -181,9 +190,34 @@ class Player {
       detachedAt: index >= 0 ? null : this.#state.detachedAt,
       status: status === 'empty' && queue.length ? 'stopped' : status,
     });
-    // Custom art set (or cleared) on the playing track: refresh the OS overlay.
-    if (index >= 0 && queue[index].artUrl !== current.artUrl) this.#updateMediaSession(queue[index]);
+    if (index < 0) return;
+    const now = queue[index];
+    // Renamed, or custom art set (or cleared), while playing: refresh the OS overlay.
+    if (now.artUrl !== current.artUrl || now.title !== current.title) this.#updateMediaSession(now);
+    // Gain adjusted while playing (or preloaded): it applies straight away.
+    if (this.#active?.holds(now) && this.#active.gainDb !== (now.gainDb ?? 0) && this.#previewing?.id !== now.id) {
+      this.#active.setGain(now.gainDb ?? 0);
+    }
+    const preloaded = this.#idle?.trackId && queue.find((track) => this.#idle.holds(track));
+    if (preloaded && this.#idle.gainDb !== (preloaded.gainDb ?? 0)) this.#idle.setGain(preloaded.gainDb ?? 0);
   }
+
+  #previewing = null;
+
+  /**
+   * Track ▸ Adjust Gain previews on the playing track before it's applied:
+   * `db` for track `id` if it's the one playing, or null to go back to its
+   * saved gain.
+   */
+  previewGain(id, db) {
+    const { current } = this.#state;
+    this.#previewing = db == null ? null : { id };
+    if (!this.#active || current?.id !== id || !this.#active.holds(current)) return;
+    this.#active.setGain(db ?? current.gainDb ?? 0);
+  }
+
+  /** The gain the playing deck applies, in dB (Properties, tests). */
+  getAppliedGainDb = () => (this.#active?.trackId ? this.#active.gainDb : null);
 
   /** Stop and forget everything: the playing playlist is gone. */
   clear() {

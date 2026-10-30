@@ -1,6 +1,7 @@
 import { player } from '../audio/engine.js';
-import { buildLayout, moveTracks, moveGroup, PRESETS } from './grouping.js';
+import { applyGroupEdits, buildLayout, moveTracks, moveGroup, newCustomKey, pinTracks, PRESETS } from './grouping.js';
 import { artRefUrl, symbolSeed, trackArtUrl } from './art.js';
+import { clampGain, trackGainDb } from './gain.js';
 
 /**
  * The playlist store (PLAN.md §5 "Playlist tabs", "Undo / redo").
@@ -37,8 +38,8 @@ let state = {
   playingId: null,
 };
 
-// meta.name stays empty until the user names the playlist (Phase 7); until
-// then it's shown under its file name. See playlistName().
+// meta.name stays empty until the user names the playlist (Playlist ▸
+// Properties); until then it's shown under its file name. See playlistName().
 const emptyDoc = () => ({
   meta: { name: '', description: '', author: '', cover: null },
   palette: null,
@@ -133,7 +134,7 @@ export function trackView(track, resolution) {
     artist: track.tags.artist,
     album: track.tags.album,
     duration: track.tags.duration,
-    gainDb: track.overrides.gainDb ?? 0,
+    gainDb: trackGainDb(track),
     path: track.absPath,
   };
 }
@@ -361,6 +362,18 @@ export function moveTracksTo(id, ids, { beforeId = null, afterId = null } = {}) 
   });
 }
 
+/**
+ * Drag tracks into a custom group: pin them to it and put them where they
+ * were dropped, as one step. `at` is { beforeId } or { afterId }.
+ */
+export function dropIntoGroup(id, ids, key, at) {
+  edit(id, plural(ids.length, 'Move Track to Group', 'Move Tracks to Group'), (doc) => {
+    const pinned = pinTracks(doc.tracks, doc.grouping, ids, key);
+    const tracks = moveTracks(pinned, ids, at.beforeId ?? null, at.afterId ?? null);
+    return tracks === doc.tracks ? doc : { ...doc, tracks };
+  });
+}
+
 /** Drag-reorder a whole group before another (null = end). */
 export function moveGroupTo(id, key, beforeKey) {
   const playlist = state.playlists[id];
@@ -389,10 +402,116 @@ export function setTrackArt(id, ids, ref) {
 
 /** Playlist ▸ Grouping. `preset` is a PRESETS key, or null for off. */
 export function setGrouping(id, preset) {
-  const label = preset ? `Group by ${preset === 'album' ? 'Album' : 'Artist'}` : 'Turn Off Grouping';
+  const labels = { album: 'Group by Album', artist: 'Group by Artist', manual: 'Custom Groups Only' };
+  const label = preset ? labels[preset] : 'Turn Off Grouping';
   edit(id, label, (doc) =>
     (doc.grouping?.preset ?? null) === preset ? doc : { ...doc, grouping: preset ? PRESETS[preset] : null }
   );
+}
+
+/**
+ * Playlist ▸ Grouping ▸ Custom…: a user-written template
+ * ({ groupKey, mainName, subNames }). One that matches a preset becomes it.
+ */
+export function setGroupingTemplate(id, template) {
+  const same = (a, b) => a.groupKey === b.groupKey && a.mainName === b.mainName && JSON.stringify(a.subNames) === JSON.stringify(b.subNames);
+  const preset = Object.values(PRESETS).find((candidate) => same(candidate, template));
+  const grouping = preset ?? { preset: 'custom', groupKey: template.groupKey, mainName: template.mainName, subNames: template.subNames };
+  edit(id, 'Custom Grouping', (doc) => (doc.grouping && same(doc.grouping, grouping) && doc.grouping.preset === grouping.preset ? doc : { ...doc, grouping }));
+}
+
+/** Change some tracks' overrides. `change(overrides, track)` returns new overrides, or the same object. */
+function editOverrides(id, ids, label, change) {
+  const targets = new Set(ids);
+  edit(id, label, (doc) => {
+    let changed = false;
+    const tracks = doc.tracks.map((track) => {
+      if (!targets.has(track.id)) return track;
+      const overrides = change(track.overrides, track);
+      if (overrides === track.overrides) return track;
+      changed = true;
+      return { ...track, overrides };
+    });
+    return changed ? { ...doc, tracks } : doc;
+  });
+}
+
+const without = (overrides, field) => {
+  if (!(field in overrides)) return overrides;
+  const { [field]: _, ...rest } = overrides;
+  return rest;
+};
+
+/**
+ * Track ▸ Rename. The name lives in the playlist, never in the file's tags.
+ * An empty name, or the tag title itself, removes the override.
+ */
+export function renameTrack(id, trackId, title) {
+  const name = title.trim();
+  editOverrides(id, [trackId], 'Rename Track', (overrides, track) => {
+    if (!name || name === track.tags.title) return without(overrides, 'title');
+    return overrides.title === name ? overrides : { ...overrides, title: name };
+  });
+}
+
+/** Track ▸ Adjust Gain: set `ids` to `db` (clamped to the cap), or null to reset to ReplayGain. */
+export function setTrackGain(id, ids, db) {
+  if (db == null) {
+    editOverrides(id, ids, 'Reset Gain', (overrides) => without(overrides, 'gainDb'));
+    return;
+  }
+  const value = Math.round(clampGain(db) * 100) / 100;
+  editOverrides(id, ids, 'Adjust Gain', (overrides) => (overrides.gainDb === value ? overrides : { ...overrides, gainDb: value }));
+}
+
+/** Track ▸ Reset All Overrides: name, art, gain and group pin, back to the file's own. */
+export function resetOverrides(id, ids) {
+  const targets = new Set(ids);
+  edit(id, 'Reset All Overrides', (doc) => {
+    let changed = false;
+    const tracks = doc.tracks.map((track) => {
+      if (!targets.has(track.id) || (Object.keys(track.overrides).length === 0 && !track.groupId)) return track;
+      changed = true;
+      return { ...track, overrides: {}, groupId: null };
+    });
+    return changed ? { ...doc, tracks } : doc;
+  });
+}
+
+/** Playlist ▸ Properties: name, description, author, cover ("art/<name>" or null). */
+export function setMeta(id, meta) {
+  edit(id, 'Edit Playlist Properties', (doc) => {
+    const next = { ...doc.meta, ...meta };
+    return JSON.stringify(next) === JSON.stringify(doc.meta) ? doc : { ...doc, meta: next };
+  });
+}
+
+/** Edit Groups: `edits` maps group keys to patches (grouping.js applyGroupEdits). */
+export function editGroups(id, edits, label = 'Edit Groups') {
+  edit(id, label, (doc) => applyGroupEdits(doc, edits));
+}
+
+/** Track ▸ Move to Group: pin `ids` to group `key`, or null to follow their tags again. */
+export function moveToGroup(id, ids, key) {
+  edit(id, key ? 'Move to Group' : 'Ungroup Tracks', (doc) => {
+    if (!doc.grouping) return doc;
+    const tracks = pinTracks(doc.tracks, doc.grouping, ids, key);
+    return tracks === doc.tracks ? doc : { ...doc, tracks };
+  });
+}
+
+/**
+ * Track ▸ Move to Group ▸ New Group: a custom group holding `ids`. Returns
+ * its key. With grouping off, this also turns on Custom Groups Only, so the
+ * rest of the playlist isn't suddenly regrouped by its tags.
+ */
+export function createGroup(id, ids, mainName = 'New Group') {
+  const key = newCustomKey();
+  edit(id, 'New Group', (doc) => {
+    const grouping = doc.grouping ?? PRESETS.manual;
+    return { ...doc, grouping, groups: [...doc.groups, { key, custom: true, mainName }], tracks: pinTracks(doc.tracks, grouping, ids, key) };
+  });
+  return key;
 }
 
 // --- View state (not undoable) -----------------------------------------------
@@ -488,25 +607,27 @@ export function play(id, trackId) {
 
 // The engine plays a flat queue. Whenever the playing playlist's order or
 // resolution changes, hand it the new queue; it keeps its place by id.
-let synced = { id: null, tracks: null, resolution: null, grouping: null };
+let synced = { id: null, tracks: null, resolution: null, grouping: null, groups: null };
 
 function syncQueue() {
   const playlist = state.playlists[state.playingId];
   if (!playlist) {
     if (synced.id !== null) player.clear();
-    synced = { id: null, tracks: null, resolution: null, grouping: null };
+    synced = { id: null, tracks: null, resolution: null, grouping: null, groups: null };
     return;
   }
-  const { tracks, grouping } = playlist.doc;
+  // Custom groups (doc.groups) take part in the display order too.
+  const { tracks, grouping, groups } = playlist.doc;
   if (
     synced.id === playlist.id &&
     synced.tracks === tracks &&
     synced.resolution === playlist.resolution &&
-    synced.grouping === grouping
+    synced.grouping === grouping &&
+    synced.groups === groups
   ) {
     return;
   }
-  synced = { id: playlist.id, tracks, resolution: playlist.resolution, grouping };
+  synced = { id: playlist.id, tracks, resolution: playlist.resolution, grouping, groups };
   player.setQueue(queueOf(playlist));
 }
 

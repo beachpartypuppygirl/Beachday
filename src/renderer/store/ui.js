@@ -10,8 +10,13 @@ export const DEFAULT_ART_FRACTION = 0.55;
 
 const listeners = new Set();
 let state = {
-  /** null | 'relink' | 'mappings' | 'shortcuts' | 'about' | 'properties' */
+  /**
+   * null | 'relink' | 'mappings' | 'shortcuts' | 'about' | 'properties' |
+   * 'playlistProperties' | 'gain' | 'grouping' | 'groups'
+   */
   dialog: null,
+  /** What the open dialog is about, e.g. { key } for 'groups', { ids } for 'gain' */
+  dialogArgs: null,
   /** null | { label, fraction? } — a save or import in progress */
   busy: null,
   /** null | string — a short message, cleared after a few seconds */
@@ -22,6 +27,8 @@ let state = {
   restoreTabs: true,
   /** Ask the track list to scroll a row into view: { playlistId, trackId, nonce } */
   scrollRequest: null,
+  /** Track ▸ Rename (F2): edit this row's title in place. { playlistId, trackId, nonce } */
+  renameRequest: null,
   /** View ▸ Show Art Pane, and its share of the window width (mirrors app config) */
   artPane: { visible: true, fraction: DEFAULT_ART_FRACTION },
   /** Options ▸ Pause GIFs When Window Is Unfocused (mirrors app config) */
@@ -45,8 +52,8 @@ export const subscribe = (listener) => {
 export const getState = () => state;
 export const useUi = () => useSyncExternalStore(subscribe, getState);
 
-export const openDialog = (dialog) => set({ dialog });
-export const closeDialog = () => set({ dialog: null });
+export const openDialog = (dialog, dialogArgs = null) => set({ dialog, dialogArgs });
+export const closeDialog = () => set({ dialog: null, dialogArgs: null });
 export const setBusy = (busy) => set({ busy });
 
 export function notify(notice) {
@@ -84,6 +91,9 @@ export function setPauseGifsWithPlayback(pauseGifsWithPlayback) {
 let scrollNonce = 0;
 export const requestScroll = (playlistId, trackId) =>
   set({ scrollRequest: { playlistId, trackId, nonce: ++scrollNonce } });
+export const requestRename = (playlistId, trackId) =>
+  set({ renameRequest: { playlistId, trackId, nonce: ++scrollNonce } });
+export const clearRename = () => set({ renameRequest: null });
 
 export async function refreshRecent() {
   set({ recentFiles: await window.beachday.playlist.recent() });

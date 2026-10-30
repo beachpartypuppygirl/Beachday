@@ -4,6 +4,14 @@ import * as ui from '../store/ui.js';
 import * as actions from '../store/actions.js';
 import { COMMANDS } from '../menus/commands.js';
 import { formatTime } from '../format.js';
+import { player } from '../audio/engine.js';
+import { artRefUrl } from '../store/art.js';
+import { GAIN_MAX_DB, GAIN_MIN_DB, clampGain, formatGain, seedGainDb, trackGainDb } from '../store/gain.js';
+import { PRESETS, SUB_LINES, TOKENS, applyGroupEdits, buildLayout } from '../store/grouping.js';
+import ArtImage from './ArtImage.jsx';
+import { GroupHeader } from './TrackList.jsx';
+
+const viewedPlaylist = (state) => state.playlists[state.viewedId];
 
 /** Renders whichever dialog the ui store says is open. */
 export default function Dialogs() {
@@ -13,10 +21,14 @@ export default function Dialogs() {
   if (dialog === 'shortcuts') return <ShortcutsDialog />;
   if (dialog === 'about') return <AboutDialog />;
   if (dialog === 'properties') return <PropertiesDialog />;
+  if (dialog === 'playlistProperties') return <PlaylistPropertiesDialog />;
+  if (dialog === 'gain') return <GainDialog />;
+  if (dialog === 'grouping') return <GroupingDialog />;
+  if (dialog === 'groups') return <GroupsDialog />;
   return null;
 }
 
-function Modal({ title, children, footer, wide = false }) {
+function Modal({ title, children, footer, wide = false, className = '' }) {
   const panelRef = useRef(null);
 
   useEffect(() => {
@@ -24,13 +36,16 @@ function Modal({ title, children, footer, wide = false }) {
       if (event.key === 'Escape') ui.closeDialog();
     };
     document.addEventListener('keydown', onKeyDown);
-    panelRef.current?.querySelector('button, input')?.focus();
+    const panel = panelRef.current;
+    const first = panel?.querySelector('[data-autofocus]') ?? panel?.querySelector('button, input');
+    first?.focus();
+    first?.select?.();
     return () => document.removeEventListener('keydown', onKeyDown);
   }, []);
 
   return (
     <div className="modal" onPointerDown={(event) => event.target === event.currentTarget && ui.closeDialog()}>
-      <div className={`modal__panel${wide ? ' modal__panel--wide' : ''}`} role="dialog" aria-modal="true" aria-label={title} ref={panelRef}>
+      <div className={`modal__panel${wide ? ' modal__panel--wide' : ''} ${className}`} role="dialog" aria-modal="true" aria-label={title} ref={panelRef}>
         <h2 className="modal__title">{title}</h2>
         <div className="modal__body">{children}</div>
         <div className="modal__footer">{footer}</div>
@@ -233,6 +248,16 @@ function PropertiesDialog() {
     ['Location', resolved?.status === 'ok' ? (resolved.how === 'bundled' ? 'Inside this playlist (bundled)' : track.absPath) : `Missing — ${track.absPath ?? 'unknown'}`],
   ].filter(([, value]) => value !== null && value !== undefined && value !== '');
 
+  const gain = trackGainDb(track);
+  const gainSource = Number.isFinite(track.overrides.gainDb) ? 'set in this playlist' : tags.replayGainDb != null ? 'from ReplayGain' : 'default';
+  const group = playlist.doc.grouping && track.groupId ? store.layoutOf(playlist).groupOf.get(track.id) : null;
+  const playlistFields = [
+    ['Name', track.overrides.title],
+    ['Gain', `${formatGain(gain)} (${gainSource})`],
+    ['Custom art', track.overrides.art ? 'Yes' : null],
+    ['Group', group?.key === track.groupId ? `${group.mainName} (moved here)` : null],
+  ].filter(([, value]) => value);
+
   return (
     <Modal title="Track properties" wide footer={close}>
       <p className="modal__text modal__text--muted">Read from the file’s tags. Beachday never changes them.</p>
@@ -244,6 +269,450 @@ function PropertiesDialog() {
           </div>
         ))}
       </dl>
+      <h3 className="modal__section">In this playlist</h3>
+      <dl className="about">
+        {playlistFields.map(([label, value]) => (
+          <div key={label} className="about__row">
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </Modal>
+  );
+}
+
+// --- Playlist properties (Playlist ▸ Properties…) ---------------------------
+
+function PlaylistPropertiesDialog() {
+  const playlist = viewedPlaylist(useSyncExternalStore(store.subscribe, store.getState));
+  const { busy } = ui.useUi();
+  const [draft, setDraft] = useState(() => ({ ...playlist.doc.meta }));
+  const update = (patch) => setDraft({ ...draft, ...patch });
+  const unnamed = store.playlistName({ ...playlist, doc: { ...playlist.doc, meta: { ...playlist.doc.meta, name: '' } } });
+  const coverUrl = artRefUrl(draft.cover);
+
+  const chooseCover = async () => {
+    const ref = await actions.pickArt('Choose playlist cover');
+    if (ref) setDraft((current) => ({ ...current, cover: ref }));
+  };
+
+  const apply = () => {
+    store.setMeta(playlist.id, {
+      name: draft.name.trim(),
+      author: draft.author.trim(),
+      description: draft.description.trim(),
+      cover: draft.cover ?? null,
+    });
+    ui.closeDialog();
+  };
+
+  return (
+    <Modal
+      title="Playlist properties"
+      wide
+      footer={
+        <>
+          <button className="button button--quiet" type="button" onClick={ui.closeDialog}>
+            Cancel
+          </button>
+          <button className="button" type="button" disabled={Boolean(busy)} onClick={apply}>
+            Apply
+          </button>
+        </>
+      }
+    >
+      <div className="meta">
+        <div className="meta__fields">
+          <label className="form__label">
+            Name
+            <input className="field" data-autofocus value={draft.name} placeholder={unnamed} onChange={(e) => update({ name: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && apply()} />
+          </label>
+          <label className="form__label">
+            Author
+            <input className="field" value={draft.author} placeholder="Who made this playlist" onChange={(e) => update({ author: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && apply()} />
+          </label>
+          <label className="form__label">
+            Description
+            <textarea className="field form__textarea" rows={5} value={draft.description} onChange={(e) => update({ description: e.target.value })} />
+          </label>
+        </div>
+        <div className="meta__cover">
+          <span className="form__label">Cover</span>
+          <div className="artpick">
+            {coverUrl ? <ArtImage key={coverUrl} className="artpick__image" src={coverUrl} /> : <span className="artpick__none">No cover</span>}
+          </div>
+          <div className="artpick__actions">
+            <button className="button button--quiet" type="button" disabled={Boolean(busy)} onClick={chooseCover}>
+              Choose…
+            </button>
+            <button className="button button--quiet" type="button" disabled={!draft.cover} onClick={() => update({ cover: null })}>
+              Remove
+            </button>
+          </div>
+        </div>
+      </div>
+      <p className="modal__text modal__text--muted form__note">
+        Saved inside the playlist, cover included, so they travel with it.
+      </p>
+    </Modal>
+  );
+}
+
+// --- Gain (Track ▸ Adjust Gain…) ---------------------------------------------
+
+function GainDialog() {
+  const { dialogArgs } = ui.useUi();
+  const state = useSyncExternalStore(store.subscribe, store.getState);
+  const playlist = state.playlists[dialogArgs.playlistId];
+  const ids = new Set(dialogArgs.ids);
+  const tracks = (playlist?.doc.tracks ?? []).filter((track) => ids.has(track.id));
+  const gains = tracks.map(trackGainDb);
+  const mixed = gains.some((gain) => gain !== gains[0]);
+  const [text, setText] = useState(() => String(gains[0] ?? 0));
+  const parsed = Number.parseFloat(text.replace('−', '-').replace('+', ''));
+  const valid = Number.isFinite(parsed);
+  const db = valid ? clampGain(parsed) : null;
+
+  // Hear it on the playing track before applying.
+  const playingId = state.playingId === dialogArgs.playlistId ? player.getState().current?.id : null;
+  const previewId = playingId && ids.has(playingId) ? playingId : null;
+  useEffect(() => {
+    if (previewId && db != null) player.previewGain(previewId, db);
+  }, [previewId, db]);
+  useEffect(() => () => previewId && player.previewGain(previewId, null), [previewId]);
+
+  const apply = () => {
+    if (db == null) return;
+    store.setTrackGain(playlist.id, dialogArgs.ids, db);
+    ui.closeDialog();
+  };
+  const reset = () => {
+    store.setTrackGain(playlist.id, dialogArgs.ids, null);
+    ui.closeDialog();
+  };
+
+  const [single] = tracks;
+  const seedNote =
+    tracks.length === 1
+      ? single.tags.replayGainDb != null
+        ? `ReplayGain says ${formatGain(seedGainDb(single))} for this track; that’s where it starts.`
+        : 'This file has no ReplayGain tag, so it starts at 0 dB.'
+      : 'Each track starts at its ReplayGain value (or 0 dB without one).';
+
+  return (
+    <Modal
+      title={tracks.length === 1 ? `Gain: ${single.overrides.title || single.tags.title}` : `Gain for ${tracks.length} tracks`}
+      footer={
+        <>
+          <button className="button button--quiet" type="button" onClick={reset}>
+            Reset to ReplayGain
+          </button>
+          <span className="modal__spacer" />
+          <button className="button button--quiet" type="button" onClick={ui.closeDialog}>
+            Cancel
+          </button>
+          <button className="button" type="button" disabled={db == null} onClick={apply}>
+            Apply
+          </button>
+        </>
+      }
+    >
+      <div className="gain">
+        <input
+          className="gain__slider"
+          type="range"
+          min={GAIN_MIN_DB}
+          max={GAIN_MAX_DB}
+          step={0.5}
+          value={db ?? 0}
+          aria-label="Gain in dB"
+          onChange={(e) => setText(e.target.value)}
+        />
+        <label className="gain__value">
+          <input
+            className="field gain__field"
+            data-autofocus
+            value={text}
+            inputMode="decimal"
+            aria-label="Gain in dB"
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && apply()}
+          />
+          dB
+        </label>
+      </div>
+      {valid && parsed > GAIN_MAX_DB && <p className="modal__text">Boosts stop at +{GAIN_MAX_DB} dB, past which the limiter can’t keep them clean.</p>}
+      {mixed && <p className="modal__text">These tracks have different gains now. Apply sets them all to this.</p>}
+      <p className="modal__text modal__text--muted">
+        {seedNote} {previewId ? 'You’re hearing the change on the playing track.' : ''}
+      </p>
+    </Modal>
+  );
+}
+
+// --- Grouping template (Playlist ▸ Grouping ▸ Custom…) -----------------------
+
+/** A token list that inserts into whichever template field was focused last. */
+function TokenHelp({ onInsert }) {
+  return (
+    <p className="tokens">
+      {TOKENS.map((token) => (
+        <button key={token} className="tokens__token" type="button" onPointerDown={(e) => e.preventDefault()} onClick={() => onInsert(`%${token}%`)}>
+          %{token}%
+        </button>
+      ))}
+    </p>
+  );
+}
+
+/**
+ * Insert text at the caret of the template field being edited. Token buttons
+ * don't take focus, so that's normally the focused field; `lastField` covers
+ * focus having moved elsewhere since.
+ */
+function insertAtCaret(lastField, setValue, text) {
+  const active = document.activeElement;
+  const input = active?.matches?.('.modal input[name]') ? active : lastField.current;
+  if (!input) return;
+  const { selectionStart = input.value.length, selectionEnd = input.value.length } = input;
+  const value = input.value.slice(0, selectionStart) + text + input.value.slice(selectionEnd);
+  setValue(input.name, value);
+  requestAnimationFrame(() => {
+    input.focus();
+    input.setSelectionRange(selectionStart + text.length, selectionStart + text.length);
+  });
+}
+
+const PREVIEW_GROUPS = 3;
+
+function GroupingDialog() {
+  const playlist = viewedPlaylist(useSyncExternalStore(store.subscribe, store.getState));
+  const fromTemplate = (template) => ({
+    groupKey: template.groupKey,
+    mainName: template.mainName,
+    sub0: template.subNames[0] ?? '',
+    sub1: template.subNames[1] ?? '',
+  });
+  const [draft, setDraft] = useState(() => fromTemplate(playlist.doc.grouping ?? PRESETS.album));
+  const lastField = useRef(null);
+  const setField = (name, value) => setDraft((current) => ({ ...current, [name]: value }));
+  const template = {
+    groupKey: draft.groupKey,
+    mainName: draft.mainName,
+    subNames: [draft.sub0, draft.sub1].slice(0, SUB_LINES).filter((line, i, all) => line || all.slice(i + 1).some(Boolean)),
+  };
+  const layout = buildLayout({ ...playlist.doc, grouping: template }, playlist.resolution, new Set());
+
+  const apply = () => {
+    store.setGroupingTemplate(playlist.id, template);
+    ui.closeDialog();
+  };
+
+  const field = (name, label, hint) => (
+    <label className="form__label">
+      {label}
+      <input
+        className="field form__mono"
+        name={name}
+        value={draft[name]}
+        placeholder={hint}
+        spellCheck={false}
+        data-autofocus={name === 'groupKey' ? true : undefined}
+        onFocus={(e) => (lastField.current = e.currentTarget)}
+        onChange={(e) => setField(name, e.target.value)}
+      />
+    </label>
+  );
+
+  return (
+    <Modal
+      title="Custom grouping"
+      wide
+      footer={
+        <>
+          <span className="modal__message">Start from:</span>
+          <button className="button button--quiet" type="button" onClick={() => setDraft(fromTemplate(PRESETS.album))}>
+            By Album
+          </button>
+          <button className="button button--quiet" type="button" onClick={() => setDraft(fromTemplate(PRESETS.artist))}>
+            By Artist
+          </button>
+          <span className="modal__spacer" />
+          <button className="button button--quiet" type="button" onClick={ui.closeDialog}>
+            Cancel
+          </button>
+          <button className="button" type="button" onClick={apply}>
+            Apply
+          </button>
+        </>
+      }
+    >
+      <p className="modal__text">
+        Tracks whose <strong>Group by</strong> line comes out the same share a group. The other lines are
+        the group’s header. Click a token to add it. A segment between “ | ” that comes out empty is left out.
+      </p>
+      <div className="form">
+        {field('groupKey', 'Group by', 'Empty: every track in one group')}
+        {field('mainName', 'Header', '%album%')}
+        {field('sub0', 'Second line', '%albumartist%')}
+        {field('sub1', 'Third line', '%tracks% | Time: %duration%')}
+      </div>
+      <TokenHelp onInsert={(text) => insertAtCaret(lastField, setField, text)} />
+      <h3 className="modal__section">
+        Preview · {layout.groups.length} {layout.groups.length === 1 ? 'group' : 'groups'}
+      </h3>
+      <div className="grouppreview">
+        {layout.groups.slice(0, PREVIEW_GROUPS).map((group) => (
+          <GroupHeader key={group.key} group={group} />
+        ))}
+        {layout.groups.length === 0 && <p className="modal__text modal__text--muted">This playlist has no tracks yet.</p>}
+      </div>
+    </Modal>
+  );
+}
+
+// --- Edit Groups (Playlist ▸ Edit Groups…, a header's Edit Group…) ------------
+
+function GroupsDialog() {
+  const { dialogArgs, busy } = ui.useUi();
+  const playlist = viewedPlaylist(useSyncExternalStore(store.subscribe, store.getState));
+  const [edits, setEdits] = useState(() => new Map());
+  const [selectedKey, setSelectedKey] = useState(dialogArgs?.key ?? null);
+  const lastField = useRef(null);
+  const doc = playlist.doc;
+  const draftDoc = applyGroupEdits(doc, edits);
+  const layout = buildLayout(draftDoc, playlist.resolution, new Set());
+  const groups = layout.groups ?? [];
+  const group = groups.find((g) => g.key === selectedKey) ?? groups[0];
+
+  // Each line's placeholder is what it shows without an override.
+  const plainDoc = { ...draftDoc, groups: draftDoc.groups.map(({ mainName, subNames, ...rest }) => (rest.custom ? { ...rest, mainName } : rest)) };
+  const plain = buildLayout(plainDoc, playlist.resolution, new Set()).groups?.find((g) => g.key === group?.key);
+
+  if (!group) {
+    return (
+      <Modal title="Edit groups" footer={<button className="button" type="button" onClick={ui.closeDialog}>Close</button>}>
+        <p className="modal__text">Turn on grouping (Playlist ▸ Grouping) to edit groups.</p>
+      </Modal>
+    );
+  }
+
+  const entry = draftDoc.groups.find((g) => g.key === group.key) ?? { key: group.key };
+  const patch = (fields) => setEdits((current) => new Map(current).set(group.key, { ...current.get(group.key), ...fields }));
+  const subNames = Array.from({ length: SUB_LINES }, (_, i) => entry.subNames?.[i] ?? '');
+  const setSub = (i, value) => patch({ subNames: subNames.map((line, j) => (j === i ? value : line)) });
+  const setByName = (name, value) => (name === 'mainName' ? patch({ mainName: value }) : setSub(Number(name.slice(3)), value));
+  const explicitArt = artRefUrl(entry.art);
+
+  const chooseArt = async () => {
+    const ref = await actions.pickArt('Choose group art');
+    if (ref) patch({ art: ref });
+  };
+
+  const apply = () => {
+    if (edits.size) store.editGroups(playlist.id, edits);
+    ui.closeDialog();
+  };
+
+  return (
+    <Modal
+      title="Edit groups"
+      wide
+      className="modal__panel--groups"
+      footer={
+        <>
+          {group.custom && (
+            <button className="button button--quiet" type="button" title="Its tracks go back to the groups their tags give them" onClick={() => patch({ dissolve: true })}>
+              Dissolve Group
+            </button>
+          )}
+          <span className="modal__spacer" />
+          <button className="button button--quiet" type="button" onClick={ui.closeDialog}>
+            Cancel
+          </button>
+          <button className="button" type="button" disabled={Boolean(busy)} onClick={apply}>
+            Apply
+          </button>
+        </>
+      }
+    >
+      <div className="groupedit">
+        <ul className="groupedit__list" role="listbox" aria-label="Groups">
+          {groups.map((g) => (
+            <li
+              key={g.key}
+              role="option"
+              aria-selected={g === group}
+              className={`groupedit__item${g === group ? ' groupedit__item--selected' : ''}`}
+              onClick={() => setSelectedKey(g.key)}
+            >
+              <span className="groupedit__names">
+                <span className="groupedit__name">{g.mainName}</span>
+                {g.subNames[0] && <span className="groupedit__sub">{g.subNames[0]}</span>}
+              </span>
+              <span className="groupedit__count">
+                {g.custom ? 'custom · ' : ''}
+                {g.trackIds.length}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <div className="groupedit__form" key={group.key}>
+          <div className="grouppreview">
+            <GroupHeader group={group} />
+          </div>
+          <div className="form">
+            <label className="form__label">
+              Header
+              <input
+                className="field"
+                name="mainName"
+                data-autofocus={dialogArgs?.focusName ? true : undefined}
+                value={entry.mainName ?? ''}
+                placeholder={plain?.mainName}
+                spellCheck={false}
+                onFocus={(e) => (lastField.current = e.currentTarget)}
+                onChange={(e) => patch({ mainName: e.target.value })}
+              />
+            </label>
+            {subNames.map((line, i) => (
+              <label key={i} className="form__label">
+                {i === 0 ? 'Second line' : 'Third line'}
+                <input
+                  className="field"
+                  name={`sub${i}`}
+                  value={line}
+                  placeholder={plain?.subNames[i] ?? ''}
+                  spellCheck={false}
+                  onFocus={(e) => (lastField.current = e.currentTarget)}
+                  onChange={(e) => setSub(i, e.target.value)}
+                />
+              </label>
+            ))}
+            <TokenHelp onInsert={(text) => insertAtCaret(lastField, setByName, text)} />
+            <label className="form__label">
+              Description
+              <textarea className="field form__textarea" rows={3} value={entry.description ?? ''} onChange={(e) => patch({ description: e.target.value })} />
+            </label>
+            <div className="form__label">
+              Art
+              <div className="artpick__row">
+                <div className="artpick artpick--small">
+                  {explicitArt ? <ArtImage key={explicitArt} className="artpick__image" src={explicitArt} paused /> : <span className="artpick__none">From its tracks</span>}
+                </div>
+                <button className="button button--quiet" type="button" disabled={Boolean(busy)} onClick={chooseArt}>
+                  Choose…
+                </button>
+                <button className="button button--quiet" type="button" disabled={!entry.art} onClick={() => patch({ art: null })}>
+                  Clear
+                </button>
+              </div>
+            </div>
+          </div>
+          <p className="modal__text modal__text--muted form__note">Empty lines show what the grouping gives them (in grey).</p>
+        </div>
+      </div>
     </Modal>
   );
 }

@@ -2,7 +2,7 @@
 
 Audio player and playlist curation tool for local music files. Linux + Windows.
 
-**Status:** Phases 1–6 complete; Phase 7 next.
+**Status:** Phases 1–7 complete; Phase 8 next.
 **Last updated:** 2026-10-30
 
 ---
@@ -389,7 +389,7 @@ should land while the codebase is small.
 | 4 | **Playlist format** — **DONE** | `.bday` saves and loads in both modes; **relink flow works across a simulated Linux→Windows path change**; multi-playlist store with per-playlist undo history (§5); **menu system** built from the `MENUS.md` table | **High** |
 | 5 | **Track list** — **DONE** | Virtualized flat list → group headers → collapse → drag-reorder → multi-select, smooth at 5,000 tracks; playlist tab strip with session restore (§5) | **High** |
 | 6 | **Art pane** — **DONE** | Large art with resizable split; GIF support with import guardrail; art resolution chain | Med |
-| 7 | **Playlist-side metadata** | Per-track rename / dB (custom art landed in Phase 6); playlist name, description, author, cover; subgroup editor | Med |
+| 7 | **Playlist-side metadata** — **DONE** | Per-track rename / dB (custom art landed in Phase 6); playlist name, description, author, cover; subgroup editor | Med |
 | 8 | **Shuffle + links** | Permutation-cursor shuffle; shuffle-remaining; contiguous chains with multi-select Link/Unlink; mid-chain click behaviour; repeat modes | Med |
 | 9 | **Theming** | Per-playlist palette picker; derived tokens; contrast validation | Med |
 | 10 | **Lyrics + packaging** | LRCLIB fetch with toggle; art-pane lyrics modes; Windows zip + Linux AppImage; install docs for friends | Med |
@@ -798,3 +798,102 @@ four sample sheets; references were the Mega Evolution symbol (flowing, standalo
 - Tested: `tests/unit/symbols.test.mjs` (determinism, 400 seeds all inside the padding, no
   NaN, every recipe appears, seed fallbacks), and the e2e suite checks the pane's symbol is the
   fingerprint's, the overlay gets a 512px PNG, and an artless group header shows its symbol.
+
+---
+
+## 15. Phase 7 — Complete (2026-10-30)
+
+Done-when met: per-track rename and dB, playlist name / description / author / cover, and the
+subgroup editor, all playlist-side, all undoable, all carried in the `.bday` and verified by
+reopening with an empty art cache.
+
+### What's built
+
+- **Rename in place** (Track ▸ Rename…, F2). The row's title becomes a field, text selected.
+  Enter or clicking away keeps it, Escape drops it, clearing it (or typing the tag title) removes
+  the override. The new name shows in the list, the transport, `%title%` in group templates and
+  the OS media overlay (refreshed live, as custom art already was).
+- **Per-track gain** (`store/gain.js`, pure). Track ▸ Adjust Gain… is a slider (−30 to +12dB)
+  plus an exact field. It previews on the playing track while you type, Cancel puts it back,
+  and Apply changes the playing deck at once (ramped, no click). For several tracks it sets
+  them all, and says when they differed. Over +12dB it's capped and says why. Reset Gain
+  goes back to the ReplayGain value. The engine also updates a preloaded deck's gain.
+- **Playlist ▸ Properties…**: name (placeholder: what it's called now), author, description,
+  cover (Choose… / Remove, previewed before Apply). The header shows the name **by author**
+  with a small cover, and the description under the name: three lines, then **more / less**
+  (a very long one scrolls when expanded). Double-click the header to open Properties. The
+  tab and the session list use the name.
+- **Playlist ▸ Grouping ▸ Custom…**: edits the template (Group by, header, second and third
+  line), with clickable `%tokens%`, By Album / By Artist starting points, and a live preview of
+  the first three headers and the group count. A template identical to a preset becomes that
+  preset.
+- **Edit Groups…** (Playlist menu, or a header's right-click ▸ Edit Group…): the groups on the
+  left (name, second line, track count, "custom"), the chosen one's fields on the right with a
+  live header preview. Header lines are templates that override the grouping's line by line;
+  empty lines show the grouping's value in grey. Description (shown under the header's
+  lines, up to three, the rest on hover), group art (Choose… / Clear; without it, art comes from its tracks as before). Everything applies
+  as one undo step.
+- **Custom groups and Move to Group**: Track ▸ Move to Group ▸ lists every group (first 40),
+  New Group…, and By Tags (Automatic). New Group… makes a custom group of the selection and
+  opens the editor on its name. It works with grouping off too: it then turns on **Grouping ▸
+  Custom Groups Only** (a preset whose tags group nothing, so every track outside a custom
+  group sits under "Ungrouped Tracks") rather than regrouping the playlist by album.
+  **Dragging tracks onto a custom group moves them into it**, where they're dropped, in one
+  undo step; tag groups still refuse tracks from elsewhere. Custom groups survive template changes. A custom group can be
+  dissolved (its tracks return to their tag groups). One that nothing is pinned to any more
+  isn't saved.
+- **Group header right-click menu**: Edit Group…, Set Group Art… / Clear Group Art,
+  Collapse/Expand All, then gain, Move to Group and the clipboard for its tracks.
+- **Track ▸ Reset All Overrides**: name, art, gain and group pin back to the file's own.
+- **Track Properties** gained an "In this playlist" section: name, gain and where it came
+  from, custom art, the group a track was moved to.
+
+### Decisions made while building
+
+- **ReplayGain is the default, not a value written at import.** `overrides.gainDb` absent
+  means "the track's ReplayGain, or 0dB", so playlists made before Phase 7 get the seed too,
+  and Reset Gain just removes the override. Same result as §11's "starts at", one fewer state.
+  The tags snapshot travels in the `.bday`, so a recipient gets the same seed. Two of the three
+  test tracks turned out to carry ReplayGain (MP3 −4.32dB, FLAC −6.92dB).
+- **Pins are group keys.** `track.groupId` holds a group key: a custom group's
+  (`custom:g_…`), or a tag-derived one. A pin is honoured while its group exists. A pin to a
+  tag group the current template no longer produces falls back to the track's own group,
+  rather than making a stray one-track group. Pinning a track to the group its tags already
+  give it stores no pin. A group's header fields come from a track that belongs by its tags,
+  not one pinned in.
+- **Group entries override, never replace.** `doc.groups[]` entries keep `key`, and may carry
+  `mainName`, `subNames`, `description`, `art`, `collapsed`, and `custom: true`. A `.bday`
+  is untrusted, so non-string values are ignored.
+- **Two sub-lines at most** in the editors (`SUB_LINES`): the 74px header row fits three
+  lines in all.
+- **Descriptions are shown, not hovered** (after review: whether to show one is the
+  curator's call, by writing one or not). A group header with a description is the one row
+  whose height isn't fixed: it's measured by the virtualizer (`measureElement`) and keyed
+  `gd:<key>`, so adding or removing a description never reuses a stale size. Row offsets now
+  come from `virtualizer.getMeasurements()`, and the old `virtualizer.measure()` after every
+  layout change is gone (it would wipe measured sizes; a change of row keys already makes the
+  virtualizer recompute). Group descriptions clamp at three lines in the list.
+- **Drops into custom groups only** (after review). In a tag group a dropped track would
+  jump straight back, so tag groups still accept only their own tracks.
+- **Menus grow to fit their labels**, up to 340px, past which a label wraps onto a second
+  line. Never cut off (an ellipsis rule added for long Move to Group names had been cutting
+  off View ▸ Jump to Now Playing and the Pause GIFs options).
+
+### Testing
+
+`tests/unit/gain.test.mjs` (seed, override, caps, formatting) and pins / custom groups /
+header overrides / dissolve / malformed entries in `grouping.test.mjs`.
+`tests/e2e/phase7.steps.mjs` (53 checks): F2 → type → Enter with real keys, Escape, clearing;
+gain preview / cancel / cap / apply / reset against the playing deck's applied gain; Playlist
+Properties with a cover; a custom template typed with a token clicked in; a real right-click ▸
+Move to Group ▸ New Group…; the group editor; a header's right-click menu; save, delete the
+art cache, reopen and play; dissolve; Reset All Overrides; pruning of an empty custom group;
+menus showing every label in full; the description's more / less; a described header growing
+with rows below making room; a real drag into a custom group; New Group… with grouping off.
+
+**Flaky, not new:** Phase 5's 5,000-track scroll check (worst step < 50ms) fails about half
+the time today on the committed Phase 6 code too, with medians ~35ms against 8ms when it was
+written. Profiling shows the same costs before and after Phase 7 (mostly React dev-mode
+element creation). The machine is busier; the threshold may want loosening, or measuring
+against the production build.
+

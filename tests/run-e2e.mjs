@@ -68,6 +68,11 @@ const GROUPS = [
     label: 'e2e6',
     suites: [['phase 6', 'e2e/phase6.steps.mjs']],
   },
+  {
+    // Phase 7: rename, gain, playlist properties and cover, custom grouping, the group editor, custom groups.
+    label: 'e2e7',
+    suites: [['phase 7', 'e2e/phase7.steps.mjs']],
+  },
 ];
 
 // E2E_ONLY=6 runs only the groups with a suite whose name contains "6".
