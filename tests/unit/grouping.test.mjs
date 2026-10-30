@@ -37,3 +37,18 @@ console.log(`PASS 5,000-track grouped layout: ${((performance.now() - t0) / 20).
 assert.deepEqual(moveTracks(tracks, ['a1'], null, 'a2').map((t) => t.id), ['b1', 'a2', 'a1', 'w1'], 'afterId');
 assert.equal(moveTracks(tracks, ['a1'], null, 'a1'), tracks);
 console.log('PASS moveTracks afterId');
+
+// Art resolution chain (store/art.js): group art → first track with art (custom, then embedded) → cover → null.
+const A = (name) => `art/${name.padEnd(32, '0')}.png`;
+const url = (ref) => `beachday-media://art/${ref.slice(4)}`;
+const arts = [T('x1', 'X', 'x'), T('x2', 'X', 'x'), T('y1', 'Y', 'y'), T('z1', 'Z', 'z')];
+const embedded = { x2: { artUrl: 'beachday-media://art/emb.jpg' } };
+let G = buildLayout({ tracks: arts, grouping: PRESETS.album, meta: {} }, embedded, new Set()).groups;
+assert.deepEqual(G.map((g) => g.artUrl), ['beachday-media://art/emb.jpg', null, null], 'first track with embedded art; none → block');
+arts[1] = { ...arts[1], overrides: { art: A('c') } };
+arts[2] = { ...arts[2], overrides: { art: A('d') } };
+G = buildLayout({ tracks: arts, grouping: PRESETS.album, meta: { cover: A('cover') }, groups: [{ key: G[2].key, art: A('g') }] }, embedded, new Set()).groups;
+assert.deepEqual(G.map((g) => g.artUrl), [url(A('c')), url(A('d')), url(A('g'))], 'custom beats embedded; explicit group art wins');
+G = buildLayout({ tracks: [T('q', 'Q', 'q')], grouping: PRESETS.album, meta: { cover: A('cover') } }, {}, new Set()).groups;
+assert.equal(G[0].artUrl, url(A('cover')), 'playlist cover before the block');
+console.log('PASS art resolution chain for group headers');

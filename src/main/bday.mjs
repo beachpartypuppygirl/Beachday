@@ -9,6 +9,7 @@ import yazl from 'yazl';
  * The .bday container (PLAN.md §4): always a ZIP, in both storage modes.
  *
  *   playlist.json   the manifest (deflated)
+ *   art/...         playlist-side art: custom track art, group art, the cover (stored)
  *   audio/...       bundled audio, present only when bundled (STORED, uncompressed)
  *
  * Audio is stored, not deflated: compressed audio barely shrinks, and a stored
@@ -22,12 +23,18 @@ import yazl from 'yazl';
 export const FORMAT_VERSION = 1;
 export const MANIFEST_NAME = 'playlist.json';
 export const AUDIO_DIR = 'audio/';
+export const ART_DIR = 'art/';
+
+// Art is read into memory on open, so cap what a (possibly hostile) file can make us read.
+const MAX_ART_ENTRY = 64 * 1024 * 1024;
+const MAX_ART_TOTAL = 512 * 1024 * 1024;
 
 export class BdayError extends Error {}
 
 /**
- * Read a .bday. Returns the parsed manifest plus the location of every stored
- * entry: name -> { offset, size } (offset of the entry's data in the zip).
+ * Read a .bday. Returns the parsed manifest, the location of every stored
+ * entry (name -> { offset, size }, offset of the entry's data in the zip), and
+ * the bytes of each art/ entry (name -> Buffer).
  */
 export async function readBday(filePath) {
   let zip;
@@ -40,9 +47,16 @@ export async function readBday(filePath) {
   try {
     let manifest = null;
     const entries = new Map();
+    const art = new Map();
+    let artTotal = 0;
     for await (const entry of zip.eachEntry()) {
       if (entry.fileName === MANIFEST_NAME) {
-        manifest = JSON.parse(await readEntryText(zip, entry));
+        manifest = JSON.parse((await readEntry(zip, entry)).toString('utf8'));
+      } else if (entry.fileName.startsWith(ART_DIR) && !entry.fileName.endsWith('/')) {
+        // Art may be deflated in a hand-made file; it's small enough to read whole.
+        if (entry.isEncrypted() || entry.uncompressedSize > MAX_ART_ENTRY) continue;
+        if ((artTotal += entry.uncompressedSize) > MAX_ART_TOTAL) continue;
+        art.set(entry.fileName, await readEntry(zip, entry));
       } else if (!entry.fileName.endsWith('/')) {
         if (entry.isCompressed() || entry.isEncrypted()) continue; // Not something we wrote; can't stream it.
         const { fileDataStart } = await zip.readLocalFileHeaderPromise(entry, { minimal: true });
@@ -54,17 +68,17 @@ export async function readBday(filePath) {
     if (!Number.isInteger(manifest.formatVersion) || manifest.formatVersion > FORMAT_VERSION) {
       throw new BdayError('This playlist was made by a newer version of Beachday');
     }
-    return { manifest, entries };
+    return { manifest, entries, art };
   } finally {
     zip.close();
   }
 }
 
-async function readEntryText(zip, entry) {
+async function readEntry(zip, entry) {
   const stream = await zip.openReadStreamPromise(entry);
   const chunks = [];
   for await (const chunk of stream) chunks.push(chunk);
-  return Buffer.concat(chunks).toString('utf8');
+  return Buffer.concat(chunks);
 }
 
 /**
@@ -76,8 +90,9 @@ async function readEntryText(zip, entry) {
  * @param {object} manifest
  * @param {{ name: string, source: { path: string, offset?: number, size: number } }[]} audio
  * @param {(written: number, total: number) => void} [onProgress] bytes of audio copied
+ * @param {{ name: string, path: string }[]} [art] art/ entries, each from a file
  */
-export async function writeBday(targetPath, manifest, audio = [], onProgress = () => {}) {
+export async function writeBday(targetPath, manifest, audio = [], onProgress = () => {}, art = []) {
   const tempPath = path.join(
     path.dirname(targetPath),
     `.${path.basename(targetPath)}.${randomBytes(4).toString('hex')}.tmp`
@@ -85,6 +100,8 @@ export async function writeBday(targetPath, manifest, audio = [], onProgress = (
 
   const zip = new yazl.ZipFile();
   zip.addBuffer(Buffer.from(JSON.stringify(manifest, null, 2)), MANIFEST_NAME);
+  // Images are already compressed; storing them costs nothing and saves the CPU.
+  for (const { name, path: artPath } of art) zip.addFile(artPath, name, { compress: false });
 
   const total = audio.reduce((sum, item) => sum + item.source.size, 0);
   let written = 0;

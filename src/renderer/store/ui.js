@@ -5,6 +5,9 @@ import { useSyncExternalStore } from 'react';
  * long-running work in progress, and short notices.
  */
 
+/** View ▸ Reset Art Pane Size: inside PLAN.md §5's 1/2–2/3 target. */
+export const DEFAULT_ART_FRACTION = 0.55;
+
 const listeners = new Set();
 let state = {
   /** null | 'relink' | 'mappings' | 'shortcuts' | 'about' | 'properties' */
@@ -19,6 +22,12 @@ let state = {
   restoreTabs: true,
   /** Ask the track list to scroll a row into view: { playlistId, trackId, nonce } */
   scrollRequest: null,
+  /** View ▸ Show Art Pane, and its share of the window width (mirrors app config) */
+  artPane: { visible: true, fraction: DEFAULT_ART_FRACTION },
+  /** Options ▸ Pause GIFs When Window Is Unfocused (mirrors app config) */
+  pauseGifs: true,
+  /** Options ▸ Pause GIFs When Playback Pauses: the art pane's GIF follows the music */
+  pauseGifsWithPlayback: true,
 };
 
 const NOTICE_MS = 5000;
@@ -47,6 +56,30 @@ export function notify(notice) {
 }
 
 export const setRestoreTabs = (restoreTabs) => set({ restoreTabs });
+
+export async function loadPrefs() {
+  const { artPane, pauseGifs, pauseGifsWithPlayback } = await window.beachday.prefs.get();
+  set({ artPane, pauseGifs, pauseGifsWithPlayback });
+}
+
+/**
+ * Change the art pane. `persist: false` updates the screen only, for every
+ * pointer move of a drag; the drag's end persists.
+ */
+export function setArtPane(patch, { persist = true } = {}) {
+  set({ artPane: { ...state.artPane, ...patch } });
+  if (persist) window.beachday.prefs.set({ artPane: state.artPane });
+}
+
+export function setPauseGifs(pauseGifs) {
+  set({ pauseGifs });
+  window.beachday.prefs.set({ pauseGifs });
+}
+
+export function setPauseGifsWithPlayback(pauseGifsWithPlayback) {
+  set({ pauseGifsWithPlayback });
+  window.beachday.prefs.set({ pauseGifsWithPlayback });
+}
 
 let scrollNonce = 0;
 export const requestScroll = (playlistId, trackId) =>

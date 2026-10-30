@@ -75,9 +75,9 @@ per playlist.
 ### View
 | Item | Shortcut | Phase |
 |---|---|---|
-| Art Pane ▸ **Art Only** / **Lyrics Only** / **Lyrics Over Art** | | 6 / 10 ✦ |
-| Show Art Pane | | 6 |
-| Reset Art Pane Size | | 6 |
+| Art Pane ▸ **Art Only** / **Lyrics Only** / **Lyrics Over Art** | | 10 ✦ |
+| Show Art Pane (toggle) | | 6 |
+| Reset Art Pane Size (also: double-click the divider) | | 6 |
 | — | | |
 | Collapse All Groups | | 5 |
 | Expand All Groups | | 5 |
@@ -135,8 +135,8 @@ Acts on the selected track(s). **The track list's right-click menu shows the sam
 | Item | Shortcut | Phase |
 |---|---|---|
 | Rename… | F2 | 7 |
-| Set Custom Art… | | 7 |
-| Clear Custom Art | | 7 |
+| Set Custom Art… (applies to every selected track) | | 6 (pulled forward from 7) |
+| Clear Custom Art | | 6 (pulled forward from 7) |
 | Adjust Gain (dB)… (capped at +12dB — PLAN.md §10) | | 7 |
 | Reset Gain | | 7 |
 | — | | |
@@ -156,7 +156,8 @@ Acts on the selected track(s). **The track list's right-click menu shows the sam
 | Preferences… (one settings window) | — |
 | Fetch Lyrics Automatically (on/off) | 10 |
 | Folder Mappings… (`C:\Music` ↔ `/home/…/Music`; app-level, not per playlist) | 4 |
-| Pause GIFs When Window Is Unfocused (on/off) | 6 ✦ |
+| Pause GIFs When Window Is Unfocused (on/off, default on) | 6 ✦ |
+| Pause GIFs When Playback Pauses (on/off, default on; the art pane's GIF) | 6 ✦ |
 
 ### Help
 | Item | Phase |
@@ -168,6 +169,24 @@ Acts on the selected track(s). **The track list's right-click menu shows the sam
 
 **Open Log Folder** exists because packaged builds swallow stdout/stderr.
 Main should log to a file, and this gives a friend a way to send that file to you.
+
+---
+
+## Art pane right-click menu
+
+Added in Phase 6 (`ART_CONTEXT_ITEMS` in `commands.js`). Acts on the **playing** track,
+whatever is selected in the list. Left-click on the art still toggles playback.
+
+| Item | Phase |
+|---|---|
+| Set Custom Art… | 6 |
+| Clear Custom Art | 6 |
+| — | |
+| Jump to Now Playing | 5 |
+| Reset Art Pane Size | 6 |
+| Show Art Pane (unticking hides it) | 6 |
+| — | |
+| Pause GIFs When Playback Pauses | 6 |
 
 ---
 
@@ -185,11 +204,14 @@ Designed in `PLAN.md` §5 (2026-10-28). Menu effects:
 ## Implementation notes
 
 **Built in Phase 4** from the table in `src/renderer/menus/commands.js`; Phase 5 added the
-selection-based items. Live now: all of File (incl. Close / Next / Previous Tab), all of Edit
-except Find, View (Collapse/Expand All, Jump to Now Playing, Zoom), Playback (except
-Order/Repeat/Reshuffle/Stop After Current), Playlist ▸ Grouping (Off / By Album / By Artist),
-Storage and Relink, Track ▸ Show in File Manager and Properties (Alt+Enter), Options ▸ Folder
-Mappings and Restore Tabs on Startup, and Help. Right-clicking a track opens the Track menu plus
+selection-based items, Phase 6 the art pane items. Live now: all of File (incl. Close / Next /
+Previous Tab), all of Edit except Find, View (Show Art Pane, Reset Art Pane Size, Collapse/Expand
+All, Jump to Now Playing, Zoom), Playback (except Order/Repeat/Reshuffle/Stop After Current),
+Playlist ▸ Grouping (Off / By Album / By Artist), Storage and Relink, Track ▸ Set Custom Art… /
+Clear Custom Art / Show in File Manager / Properties (Alt+Enter), Options ▸ Folder Mappings,
+Restore Tabs on Startup, Pause GIFs When Window Is Unfocused and Pause GIFs When Playback
+Pauses, and Help. View ▸ Art Pane ▸
+(display modes) stays hidden until Phase 10 brings lyrics; until then Art Only is the only mode. Right-clicking a track opens the Track menu plus
 Cut / Copy / Paste / Remove. The empty playlist view keeps Add files/folder buttons as a
 convenience.
 

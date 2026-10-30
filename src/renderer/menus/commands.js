@@ -24,8 +24,11 @@ const VOLUME_STEP = 0.05;
 
 /** Everything a command needs to decide its label, state and action. */
 export function getContext() {
-  const { playlists, viewedId } = store.getState();
+  const { playlists, viewedId, playingId } = store.getState();
   const playlist = playlists[viewedId];
+  const current = player.getState().current;
+  // The playing track, while it's still in its playlist (not removed mid-play).
+  const playingTrack = current && playlists[playingId]?.doc.tracks.find((track) => track.id === current.id);
   return {
     playlist,
     selected: playlist?.loaded ? store.selectedIds(playlist) : [],
@@ -33,6 +36,10 @@ export function getContext() {
     playerState: player.getState(),
     recentFiles: ui.getState().recentFiles,
     restoreTabs: ui.getState().restoreTabs,
+    artPane: ui.getState().artPane,
+    pauseGifs: ui.getState().pauseGifs,
+    pauseGifsWithPlayback: ui.getState().pauseGifsWithPlayback,
+    nowPlaying: playingTrack ? { playlist: playlists[playingId], track: playingTrack } : null,
     busy: Boolean(ui.getState().busy),
   };
 }
@@ -121,6 +128,16 @@ export const COMMANDS = {
   },
 
   // --- View ---
+  'view.showArtPane': {
+    label: 'Show Art Pane',
+    checked: (ctx) => ctx.artPane.visible,
+    run: actions.toggleArtPane,
+  },
+  'view.resetArtPane': {
+    label: 'Reset Art Pane Size',
+    enabled: (ctx) => ctx.artPane.visible && ctx.artPane.fraction !== ui.DEFAULT_ART_FRACTION,
+    run: actions.resetArtPane,
+  },
   'view.collapseAll': {
     label: 'Collapse All Groups',
     enabled: grouped,
@@ -207,6 +224,18 @@ export const COMMANDS = {
   },
 
   // --- Track (acts on the selection) ---
+  'track.setArt': {
+    label: (ctx) => (ctx.selected.length > 1 ? `Set Custom Art for ${ctx.selected.length} Tracks…` : 'Set Custom Art…'),
+    enabled: hasSelection,
+    run: (ctx) => actions.setCustomArt(ctx.playlist.id, ctx.selected),
+  },
+  'track.clearArt': {
+    label: 'Clear Custom Art',
+    enabled: (ctx) =>
+      hasSelection(ctx) &&
+      ctx.selected.some((id) => ctx.playlist.doc.tracks.find((track) => track.id === id)?.overrides.art),
+    run: (ctx) => actions.clearCustomArt(ctx.playlist.id, ctx.selected),
+  },
   'track.showInFolder': {
     label: 'Show in File Manager',
     enabled: oneFound,
@@ -219,12 +248,34 @@ export const COMMANDS = {
     run: () => ui.openDialog('properties'),
   },
 
+  // --- Art pane (right-click; acts on the playing track) ---
+  'art.setNowPlaying': {
+    label: 'Set Custom Art…',
+    enabled: (ctx) => idle(ctx) && Boolean(ctx.nowPlaying),
+    run: (ctx) => actions.setCustomArt(ctx.nowPlaying.playlist.id, [ctx.nowPlaying.track.id]),
+  },
+  'art.clearNowPlaying': {
+    label: 'Clear Custom Art',
+    enabled: (ctx) => idle(ctx) && Boolean(ctx.nowPlaying?.track.overrides.art),
+    run: (ctx) => actions.clearCustomArt(ctx.nowPlaying.playlist.id, [ctx.nowPlaying.track.id]),
+  },
+
   // --- Options ---
   'options.folderMappings': { label: 'Folder Mappings…', run: () => ui.openDialog('mappings') },
   'options.restoreTabs': {
     label: 'Restore Tabs on Startup',
     checked: (ctx) => ctx.restoreTabs,
     run: actions.toggleRestoreTabs,
+  },
+  'options.pauseGifs': {
+    label: 'Pause GIFs When Window Is Unfocused',
+    checked: (ctx) => ctx.pauseGifs,
+    run: actions.togglePauseGifs,
+  },
+  'options.pauseGifsWithPlayback': {
+    label: 'Pause GIFs When Playback Pauses',
+    checked: (ctx) => ctx.pauseGifsWithPlayback,
+    run: actions.togglePauseGifsWithPlayback,
   },
 
   // --- Help ---
@@ -235,7 +286,19 @@ export const COMMANDS = {
 const fileName = (filePath) => filePath.split(/[\\/]/).pop();
 
 /** The Track menu, also the track list's right-click menu (MENUS.md). */
-export const TRACK_ITEMS = ['track.showInFolder', 'track.properties'];
+export const TRACK_ITEMS = ['track.setArt', 'track.clearArt', '-', 'track.showInFolder', 'track.properties'];
+
+/** Right-click on the art pane: art for the playing track, and the pane itself. */
+export const ART_CONTEXT_ITEMS = [
+  'art.setNowPlaying',
+  'art.clearNowPlaying',
+  '-',
+  'view.jumpToNowPlaying',
+  'view.resetArtPane',
+  'view.showArtPane',
+  '-',
+  'options.pauseGifsWithPlayback',
+];
 
 /** Right-click on a track: the Track menu, plus the clipboard and Remove. */
 export const TRACK_CONTEXT_ITEMS = [...TRACK_ITEMS, '-', 'edit.cut', 'edit.copy', 'edit.paste', '-', 'edit.remove'];
@@ -282,6 +345,9 @@ export const MENUS = [
   {
     label: 'View',
     items: [
+      'view.showArtPane',
+      'view.resetArtPane',
+      '-',
       'view.collapseAll',
       'view.expandAll',
       'view.jumpToNowPlaying',
@@ -314,7 +380,7 @@ export const MENUS = [
     ],
   },
   { label: 'Track', items: TRACK_ITEMS },
-  { label: 'Options', items: ['options.folderMappings', 'options.restoreTabs'] },
+  { label: 'Options', items: ['options.folderMappings', 'options.restoreTabs', '-', 'options.pauseGifs', 'options.pauseGifsWithPlayback'] },
   { label: 'Help', items: ['help.shortcuts', '-', 'help.about'] },
 ];
 

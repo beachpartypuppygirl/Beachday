@@ -65,6 +65,17 @@ await writeBday(S + '/future.bday', { formatVersion: 99 });
 await assert.rejects(readBday(S + '/future.bday'), /newer version/);
 ok('rejects non-zip and future formats');
 
+// --- playlist art travels in art/ ---
+const png = Buffer.from('89504e470d0a1a0a0000000d4948445200000001000000010806000000', 'hex');
+await fs.writeFile(S + '/cover.png', png);
+const artName = 'art/0123456789abcdef0123456789abcdef.png';
+await writeBday(S + '/art.bday', { formatVersion: 1, bundled: false, meta: { cover: artName }, tracks: [] }, [], undefined, [{ name: artName, path: S + '/cover.png' }]);
+const withArt = await readBday(S + '/art.bday');
+assert.deepEqual([...withArt.art.keys()], [artName]);
+assert.ok(withArt.art.get(artName).equals(png));
+assert.equal(withArt.entries.has(artName), false, 'art is read as bytes, not offered as a streamable entry');
+ok('art/ entries round-trip through a .bday');
+
 // --- THE criterion: a playlist saved on Windows, opened on Linux ---
 // Saved at C:\Users\Me\Playlists\mix.bday; now lives in ~/Downloads (not near the music).
 const winTracks = [

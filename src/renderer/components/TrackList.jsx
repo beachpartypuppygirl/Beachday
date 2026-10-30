@@ -5,9 +5,11 @@ import * as store from '../store/playlists.js';
 import * as ui from '../store/ui.js';
 import * as actions from '../store/actions.js';
 import { formatTime } from '../format.js';
-import { getContext, TRACK_CONTEXT_ITEMS } from '../menus/commands.js';
-import { MenuList } from './MenuBar.jsx';
+import { TRACK_CONTEXT_ITEMS } from '../menus/commands.js';
+import ContextMenu from './ContextMenu.jsx';
 import TabStrip from './TabStrip.jsx';
+import ArtImage from './ArtImage.jsx';
+import { symbolUrl } from '../symbols.js';
 
 /**
  * The viewed playlist: tab strip, header, and a virtualized list of the
@@ -515,12 +517,14 @@ function LoadedPlaylist({ playlist }) {
           {drag.label}
         </div>
       )}
-      {contextMenu && <ContextMenu at={contextMenu} onClose={() => setContextMenu(null)} />}
+      {contextMenu && <ContextMenu at={contextMenu} items={TRACK_CONTEXT_ITEMS} onClose={() => setContextMenu(null)} />}
     </>
   );
 }
 
 function GroupHeader({ group, style, selected, playing, onPointerDown, onDoubleClick, onToggle }) {
+  // The last step of the art resolution chain (store/art.js): a generated symbol.
+  const block = <img className="group__art group__art--generated" src={symbolUrl(group.symbolSeed)} alt="" draggable={false} />;
   return (
     <div
       className={`group${selected ? ' group--selected' : ''}${playing ? ' group--playing' : ''}${group.collapsed ? ' group--collapsed' : ''}`}
@@ -539,14 +543,7 @@ function GroupHeader({ group, style, selected, playing, onPointerDown, onDoubleC
       >
         ›
       </button>
-      {group.artUrl ? (
-        <img className="group__art" src={group.artUrl} alt="" draggable={false} />
-      ) : (
-        // The last step of the art resolution chain (PLAN.md §5): a block from the palette.
-        <span className="group__art group__art--generated" aria-hidden="true">
-          {group.mainName.slice(0, 1).toUpperCase()}
-        </span>
-      )}
+      {group.artUrl ? <ArtImage key={group.artUrl} className="group__art" src={group.artUrl} fallback={block} /> : block}
       <div className="group__text">
         <span className="group__main">{group.mainName}</span>
         {group.subNames.map((line, i) => (
@@ -556,47 +553,6 @@ function GroupHeader({ group, style, selected, playing, onPointerDown, onDoubleC
         ))}
       </div>
       {group.year && <span className="group__year">{group.year}</span>}
-    </div>
-  );
-}
-
-function ContextMenu({ at, onClose }) {
-  const ref = useRef(null);
-  const [position, setPosition] = useState({ left: at.x, top: at.y });
-
-  // Keep the menu on screen near the window edges.
-  useLayoutEffect(() => {
-    const rect = ref.current.firstElementChild.getBoundingClientRect();
-    setPosition({
-      left: Math.min(at.x, window.innerWidth - rect.width - 8),
-      top: at.y + rect.height > window.innerHeight - 8 ? Math.max(8, at.y - rect.height) : at.y,
-    });
-  }, [at]);
-
-  useEffect(() => {
-    const onPointerDown = (event) => !ref.current.contains(event.target) && onClose();
-    const onKeyDown = (event) => event.key === 'Escape' && onClose();
-    document.addEventListener('pointerdown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    window.addEventListener('blur', onClose);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('blur', onClose);
-    };
-  }, [onClose]);
-
-  return (
-    <div className="contextmenu" ref={ref} style={position}>
-      <MenuList
-        items={TRACK_CONTEXT_ITEMS}
-        ctx={getContext()}
-        autoFocus
-        onRun={(item) => {
-          onClose();
-          item.run?.(getContext());
-        }}
-      />
     </div>
   );
 }

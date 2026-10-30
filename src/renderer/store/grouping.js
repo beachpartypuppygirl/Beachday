@@ -20,6 +20,8 @@
  * Pure and React-free.
  */
 
+import { artRefUrl, groupArtRef, symbolSeed, trackArtUrl } from './art.js';
+
 export const PRESETS = {
   album: {
     preset: 'album',
@@ -79,6 +81,10 @@ const keyOf = (template, fields) =>
 
 /**
  * @param {object} doc          playlist document
+ * Each group's artUrl follows the art chain (art.js): explicit group art,
+ * then the first track with art, then the playlist cover. null means the
+ * header draws the generated symbol for symbolSeed (its first track's).
+ *
  * @param {object} resolution   trackId -> { status, url, artUrl }
  * @param {Set<string>} collapsed  collapsed group keys
  * @returns {{
@@ -103,20 +109,22 @@ export function buildLayout(doc, resolution, collapsed) {
     const key = keyOf(grouping.groupKey, fields);
     let group = byKey.get(key);
     if (!group) {
-      group = { key, fields, trackIds: [], duration: 0, artUrl: null, year: null, playable: 0 };
+      group = { key, fields, trackIds: [], duration: 0, artUrl: null, symbolSeed: symbolSeed(track), year: null, playable: 0 };
       byKey.set(key, group);
       groups.push(group);
     }
     group.trackIds.push(track.id);
     group.duration += track.tags.duration ?? 0;
-    group.artUrl ??= resolution[track.id]?.artUrl ?? null;
+    group.artUrl ??= trackArtUrl(track, resolution[track.id]);
     group.year ??= track.tags.year ?? null;
   }
 
   const order = [];
   const rows = [];
   const groupOf = new Map();
+  const coverUrl = artRefUrl(doc.meta?.cover);
   for (const group of groups) {
+    group.artUrl = artRefUrl(groupArtRef(doc, group.key)) ?? group.artUrl ?? coverUrl;
     const count = group.trackIds.length;
     const extra = { tracks: `${count} ${count === 1 ? 'Track' : 'Tracks'}`, duration: formatDuration(group.duration) };
     const mainFields = { ...group.fields, album: group.fields.album || UNKNOWN.album, albumartist: group.fields.albumartist || UNKNOWN.albumartist };

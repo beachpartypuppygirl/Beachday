@@ -7,7 +7,8 @@ import { readBday, writeBday, bundledName, BdayError, FORMAT_VERSION } from './b
 import { resolveTracks, learnMapping } from './relink.mjs';
 import { fingerprint } from './fingerprint.mjs';
 import { ensureArt, newTrackId } from './metadata.mjs';
-import { grantMediaSource, sourceForUrl, repointMediaUrl } from './media.mjs';
+import { grantMediaSource, sourceForUrl, repointMediaUrl, artUrl } from './media.mjs';
+import { cacheArt, cacheArtFile, artExists, artNameOfRef, playlistArtRef, resolveArtPath } from './art.mjs';
 import { getConfig, addRecentFile, removeRecentFile, addFolderMapping, updateConfig } from './config.mjs';
 import { AUDIO_EXTENSIONS } from './audioFiles.mjs';
 
@@ -25,6 +26,7 @@ import { AUDIO_EXTENSIONS } from './audioFiles.mjs';
  */
 
 const BDAY_FILTERS = [{ name: 'Beachday Playlist', extensions: ['bday'] }];
+const IMAGE_FILTERS = [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'] }];
 
 // .bday paths the user has chosen through a dialog or Open Recent. Save
 // writes only to these, never to a path the renderer names on its own.
@@ -67,9 +69,42 @@ function documentFromManifest(manifest, filePath) {
     },
     palette: manifest.palette ?? null,
     grouping: manifest.grouping ?? null,
-    groups: manifest.groups ?? [],
+    groups: Array.isArray(manifest.groups) ? manifest.groups.filter((group) => group && typeof group === 'object') : [],
     tracks,
   };
+}
+
+/**
+ * Rewrite every playlist art reference in `doc` (cover, group art, custom
+ * track art) to point into this machine's art cache, unpacking each from the
+ * .bday's art/ entries on the way. A reference whose image is missing or
+ * unusable is dropped, so the art chain falls through to the next step.
+ */
+async function unpackArt(doc, art) {
+  const unpacked = new Map();
+  const unpack = (ref) => {
+    if (!ref) return null;
+    if (!unpacked.has(ref)) {
+      unpacked.set(ref, (async () => {
+        const data = art.get(ref);
+        let name = null;
+        if (data) name = await cacheArt({ data }).catch(() => null);
+        else if (await artExists(artNameOfRef(ref))) name = artNameOfRef(ref);
+        return name && playlistArtRef(name);
+      })());
+    }
+    return unpacked.get(ref);
+  };
+  const tracks = await Promise.all(
+    doc.tracks.map(async (track) => {
+      if (!track.overrides.art) return track;
+      const { art: _, ...overrides } = track.overrides;
+      const ref = await unpack(track.overrides.art);
+      return { ...track, overrides: ref ? { ...overrides, art: ref } : overrides };
+    })
+  );
+  const groups = await Promise.all(doc.groups.map(async (group) => (group.art ? { ...group, art: await unpack(group.art) } : group)));
+  return { ...doc, meta: { ...doc.meta, cover: await unpack(doc.meta.cover) }, groups, tracks };
 }
 
 /** Resolve reference tracks and build session resolution entries for them. */
@@ -101,8 +136,8 @@ async function resolveReferences(tracks, bdayPath, searchDirs = []) {
 }
 
 async function openPlaylist(filePath) {
-  const { manifest, entries } = await readBday(filePath);
-  const doc = documentFromManifest(manifest, filePath);
+  const { manifest, entries, art } = await readBday(filePath);
+  const doc = await unpackArt(documentFromManifest(manifest, filePath), art);
 
   const resolution = {};
   const references = [];
@@ -182,6 +217,17 @@ async function savePlaylist(targetPath, doc, storage, { urls, copy, extractDir, 
     }
   }
 
+  // Playlist art travels inside the file. Only valid references to images in
+  // the cache are written; anything else is dropped from the manifest.
+  const art = new Map();
+  const keepArt = (ref) => {
+    const name = artNameOfRef(ref);
+    const artPath = name && resolveArtPath(name);
+    if (!artPath || !fs.existsSync(artPath)) return null;
+    art.set(ref, artPath);
+    return ref;
+  };
+
   const taken = new Set();
   const audio = [];
   let unbundled = 0;
@@ -199,6 +245,10 @@ async function savePlaylist(targetPath, doc, storage, { urls, copy, extractDir, 
         groupId: track.groupId,
         linkNext: track.linkNext,
       };
+      if (track.overrides.art && !keepArt(track.overrides.art)) {
+        const { art: _, ...overrides } = track.overrides;
+        stored.overrides = overrides;
+      }
       // Missing audio: keep what we knew, so it can still be relinked later.
       if (!source) {
         if (storage === 'bundled') unbundled++;
@@ -235,13 +285,13 @@ async function savePlaylist(targetPath, doc, storage, { urls, copy, extractDir, 
   const manifest = {
     formatVersion: FORMAT_VERSION,
     bundled: storage === 'bundled',
-    meta: doc.meta,
+    meta: { ...doc.meta, cover: keepArt(doc.meta.cover) },
     palette: doc.palette,
     grouping: doc.grouping,
-    groups: doc.groups,
+    groups: doc.groups.map((group) => (group.art ? { ...group, art: keepArt(group.art) } : group)),
     tracks,
   };
-  await writeBday(targetPath, manifest, audio, onProgress);
+  await writeBday(targetPath, manifest, audio, onProgress, [...art].map(([name, artPath]) => ({ name, path: artPath })));
 
   if (!copy) {
     // Keep playback URLs pointing at wherever the audio now lives.
@@ -423,6 +473,22 @@ export function registerPlaylistIpc() {
       url: grantMediaSource(source),
       artUrl: await ensureArt(track.tags?.artName, source),
     };
+  });
+
+  /**
+   * Choose an image for playlist art (Track ▸ Set Custom Art). It goes through
+   * the art cache, and so through the GIF guardrail. Resolves { ref, url },
+   * or null if cancelled or unusable (after saying why).
+   */
+  ipcMain.handle('art:pick', async (event, title = 'Choose an image') => {
+    const pick = await dialog.showOpenDialog(windowOf(event), { title, properties: ['openFile'], filters: IMAGE_FILTERS });
+    if (pick.canceled) return null;
+    const name = await cacheArtFile(pick.filePaths[0]).catch(() => null);
+    if (!name) {
+      await showError(event, "Couldn't use that image.", 'Beachday shows JPEG, PNG, GIF, WebP and BMP images up to 64MB.');
+      return null;
+    }
+    return { ref: playlistArtRef(name), url: artUrl(name) };
   });
 
   ipcMain.handle('config:get-mappings', () => getConfig().folderMappings);

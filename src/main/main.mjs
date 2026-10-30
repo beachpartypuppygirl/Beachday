@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { registerMediaScheme, handleMediaProtocol } from './media.mjs';
 import { AUDIO_EXTENSIONS, collectAudioFiles, importTracks } from './metadata.mjs';
 import { registerPlaylistIpc } from './playlists.mjs';
-import { loadConfig } from './config.mjs';
+import { loadConfig, getConfig, updateConfig } from './config.mjs';
 
 // ESM has no __dirname; derive it from import.meta.url.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -171,6 +171,27 @@ ipcMain.handle('tracks:pick-folder', async (event) => {
 ipcMain.handle('tracks:import-dropped', (event, paths) => {
   if (!Array.isArray(paths)) return [];
   return importPaths(event, paths.filter((entry) => typeof entry === 'string' && entry));
+});
+
+// View preferences: app-level, never stored in a playlist.
+ipcMain.handle('prefs:get', () => {
+  const { artPane, pauseGifs, pauseGifsWithPlayback } = getConfig();
+  return { artPane, pauseGifs, pauseGifsWithPlayback };
+});
+
+ipcMain.handle('prefs:set', (_event, patch) => {
+  const clean = {};
+  for (const key of ['pauseGifs', 'pauseGifsWithPlayback']) {
+    if (typeof patch?.[key] === 'boolean') clean[key] = patch[key];
+  }
+  if (patch?.artPane) {
+    const { visible, fraction } = { ...getConfig().artPane, ...patch.artPane };
+    clean.artPane = {
+      visible: Boolean(visible),
+      fraction: Number.isFinite(fraction) ? Math.min(0.9, Math.max(0.1, fraction)) : 0.55,
+    };
+  }
+  return updateConfig(clean);
 });
 
 ipcMain.handle('app:confirm-close', () => {

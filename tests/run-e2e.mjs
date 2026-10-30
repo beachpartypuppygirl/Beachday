@@ -44,22 +44,44 @@ function runSuite(name, stepsFile, work) {
   });
 }
 
+// Each group shares one work folder; its suites run in order (a restart suite reuses the first's state).
+const GROUPS = [
+  {
+    // Phase 4: format, storage conversion mid-playback, relinking a Windows-made playlist, quit prompts.
+    label: 'e2e4',
+    prepare: (work) =>
+      new Promise((resolve) =>
+        spawn(process.execPath, [here('e2e/make-windows-playlist.mjs'), work], { stdio: 'inherit' }).on('exit', resolve)
+      ),
+    suites: [['phase 4', 'e2e/phase4.steps.mjs']],
+  },
+  {
+    // Phase 5: list, selection, drag, clipboard, grouping, tabs, 5,000 tracks; then a restart.
+    label: 'e2e5',
+    suites: [
+      ['phase 5', 'e2e/phase5.steps.mjs'],
+      ['phase 5 restart', 'e2e/phase5-restart.steps.mjs'],
+    ],
+  },
+  {
+    // Phase 6: art pane split, art chain, custom art in the .bday, GIF guardrail and pausing.
+    label: 'e2e6',
+    suites: [['phase 6', 'e2e/phase6.steps.mjs']],
+  },
+];
+
+// E2E_ONLY=6 runs only the groups with a suite whose name contains "6".
+const only = process.env.E2E_ONLY;
 const vite = await ensureDevServer();
 const results = [];
 try {
-  // Phase 4: format, storage conversion mid-playback, relinking a Windows-made playlist, quit prompts.
-  let work = await makeWorkDir('e2e4');
-  await new Promise((resolve) =>
-    spawn(process.execPath, [here('e2e/make-windows-playlist.mjs'), work], { stdio: 'inherit' }).on('exit', resolve)
-  );
-  results.push(['phase 4', await runSuite('phase 4', 'e2e/phase4.steps.mjs', work)]);
-  await removeWorkDir(work);
-
-  // Phase 5: list, selection, drag, clipboard, grouping, tabs, 5,000 tracks; then a restart.
-  work = await makeWorkDir('e2e5');
-  results.push(['phase 5', await runSuite('phase 5', 'e2e/phase5.steps.mjs', work)]);
-  results.push(['phase 5 restart', await runSuite('phase 5 restart', 'e2e/phase5-restart.steps.mjs', work)]);
-  await removeWorkDir(work);
+  for (const group of GROUPS) {
+    if (only && !group.suites.some(([name]) => name.includes(only))) continue;
+    const work = await makeWorkDir(group.label);
+    await group.prepare?.(work);
+    for (const [name, file] of group.suites) results.push([name, await runSuite(name, file, work)]);
+    await removeWorkDir(work);
+  }
 } finally {
   vite?.kill();
 }

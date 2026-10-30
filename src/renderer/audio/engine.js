@@ -20,6 +20,8 @@
  * without re-rendering everything that reads state.
  */
 
+import { symbolPng } from '../symbols.js';
+
 const PRELOAD_WINDOW_S = 10;
 // Pressing Previous this far into a track restarts it instead.
 const RESTART_THRESHOLD_S = 3;
@@ -179,6 +181,8 @@ class Player {
       detachedAt: index >= 0 ? null : this.#state.detachedAt,
       status: status === 'empty' && queue.length ? 'stopped' : status,
     });
+    // Custom art set (or cleared) on the playing track: refresh the OS overlay.
+    if (index >= 0 && queue[index].artUrl !== current.artUrl) this.#updateMediaSession(queue[index]);
   }
 
   /** Stop and forget everything: the playing playlist is gone. */
@@ -454,18 +458,20 @@ class Player {
       album: track.album ?? '',
     });
     navigator.mediaSession.metadata = metadata;
-    if (track.artUrl) this.#attachArtwork(metadata, track.artUrl);
+    if (track.artUrl) this.#attachArtwork(metadata, async () => (await fetch(track.artUrl)).blob());
+    else if (track.symbolSeed) this.#attachArtwork(metadata, () => symbolOverlayPng(track.symbolSeed));
   }
 
   #artworkObjectUrl = null;
 
   /**
    * MediaSession only accepts http/https/data/blob artwork, so re-serve the
-   * cached art as a blob URL. Async: the overlay gets art a moment later.
+   * cached art (or the generated symbol, as a PNG) as a blob URL. Async: the
+   * overlay gets art a moment later.
    */
-  async #attachArtwork(metadata, artUrl) {
+  async #attachArtwork(metadata, makeBlob) {
     try {
-      const blob = await (await fetch(artUrl)).blob();
+      const blob = await makeBlob();
       // A newer track may have started while this was fetching.
       if (navigator.mediaSession.metadata !== metadata) return;
       if (this.#artworkObjectUrl) URL.revokeObjectURL(this.#artworkObjectUrl);
@@ -475,6 +481,15 @@ class Player {
       // No overlay art is fine; the app's own art pane is unaffected.
     }
   }
+}
+
+/**
+ * The generated symbol for the OS media overlay: a PNG (it takes no SVG), on
+ * the app's background, since overlays show transparency as black or white.
+ */
+function symbolOverlayPng(seed) {
+  const background = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#14110f';
+  return symbolPng(seed, { size: 512, background });
 }
 
 function loadVolume() {

@@ -34,7 +34,9 @@
     "wait-on": "^8.0.2"
   },
   "dependencies": {
+    "gifenc": "^1.0.3",
     "music-metadata": "^12.3.2",
+    "omggif": "^1.0.10",
     "yauzl": "^3.4.0",
     "yazl": "^3.3.1"
   }

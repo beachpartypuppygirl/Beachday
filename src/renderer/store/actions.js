@@ -171,7 +171,12 @@ export async function save(id, { saveAs = false, storage, copy = false } = {}) {
       .map(([trackId, resolved]) => [trackId, resolved.url])
   );
   // Collapse state is view state, but it travels in the .bday (PLAN.md §5).
-  const groups = [...playlist.view.collapsed].map((key) => ({ key, collapsed: true }));
+  // The rest of a group entry (art, description) is document state, kept as is.
+  const { collapsed } = playlist.view;
+  const groups = [
+    ...doc.groups.map((group) => ({ ...group, collapsed: collapsed.has(group.key) })),
+    ...[...collapsed].filter((key) => !doc.groups.some((group) => group.key === key)).map((key) => ({ key, collapsed: true })),
+  ].filter((group) => group.collapsed || Object.keys(group).some((field) => field !== 'key' && field !== 'collapsed'));
 
   const label = copy ? 'Exporting' : targetStorage === 'bundled' ? 'Bundling' : 'Saving';
   ui.setBusy({ label });
@@ -330,3 +335,30 @@ export async function locateTrack(trackId) {
   const others = await resolveMissing();
   return 1 + (others ?? 0);
 }
+
+// --- Art (PLAN.md §5 "Art pane") ----------------------------------------------
+
+/**
+ * Set Custom Art: one image for tracks `ids` of playlist `id`. Track ▸ Set
+ * Custom Art passes the selection; the art pane's right-click, the playing track.
+ */
+export async function setCustomArt(id, ids) {
+  if (!ids?.length) return;
+  // A big GIF is downscaled on the way in (main's guardrail), which can take a moment.
+  ui.setBusy({ label: 'Preparing art' });
+  let picked;
+  try {
+    picked = await api.art.pick(ids.length === 1 ? 'Choose custom art' : `Choose custom art for ${ids.length} tracks`);
+  } finally {
+    ui.setBusy(null);
+  }
+  if (picked) store.setTrackArt(id, ids, picked.ref);
+}
+
+/** Clear Custom Art: back to embedded art (or the rest of the chain). */
+export const clearCustomArt = (id, ids) => store.setTrackArt(id, ids, null);
+
+export const toggleArtPane = () => ui.setArtPane({ visible: !ui.getState().artPane.visible });
+export const resetArtPane = () => ui.setArtPane({ fraction: ui.DEFAULT_ART_FRACTION });
+export const togglePauseGifs = () => ui.setPauseGifs(!ui.getState().pauseGifs);
+export const togglePauseGifsWithPlayback = () => ui.setPauseGifsWithPlayback(!ui.getState().pauseGifsWithPlayback);

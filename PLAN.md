@@ -2,8 +2,8 @@
 
 Audio player and playlist curation tool for local music files. Linux + Windows.
 
-**Status:** Phases 1–5 complete; Phase 6 next.
-**Last updated:** 2026-10-28
+**Status:** Phases 1–6 complete; Phase 7 next.
+**Last updated:** 2026-10-30
 
 ---
 
@@ -209,7 +209,7 @@ straight out of this.
 
 **Art resolution chain**, so groups look right with zero user effort:
 explicit group art → first track's custom art → first track's embedded art → playlist cover →
-generated color block from the palette.
+the first track's generated symbol (§14).
 
 **Manual override membership.** Auto-grouping gets compilations, remix albums, and split
 soundtracks wrong. A track may be pinned to a `groupId` explicitly, which wins over the derived
@@ -388,8 +388,8 @@ should land while the codebase is small.
 | 3 | **Metadata + import** — **DONE** | Folder/file import reads tags and embedded art; art cached to disk; tracks render in a flat list | Low–Med |
 | 4 | **Playlist format** — **DONE** | `.bday` saves and loads in both modes; **relink flow works across a simulated Linux→Windows path change**; multi-playlist store with per-playlist undo history (§5); **menu system** built from the `MENUS.md` table | **High** |
 | 5 | **Track list** — **DONE** | Virtualized flat list → group headers → collapse → drag-reorder → multi-select, smooth at 5,000 tracks; playlist tab strip with session restore (§5) | **High** |
-| 6 | **Art pane** | Large art with resizable split; GIF support with import guardrail; art resolution chain | Med |
-| 7 | **Playlist-side metadata** | Per-track rename / custom art / dB; playlist name, description, author, cover; subgroup editor | Med |
+| 6 | **Art pane** — **DONE** | Large art with resizable split; GIF support with import guardrail; art resolution chain | Med |
+| 7 | **Playlist-side metadata** | Per-track rename / dB (custom art landed in Phase 6); playlist name, description, author, cover; subgroup editor | Med |
 | 8 | **Shuffle + links** | Permutation-cursor shuffle; shuffle-remaining; contiguous chains with multi-select Link/Unlink; mid-chain click behaviour; repeat modes | Med |
 | 9 | **Theming** | Per-playlist palette picker; derived tokens; contrast validation | Med |
 | 10 | **Lyrics + packaging** | LRCLIB fetch with toggle; art-pane lyrics modes; Windows zip + Linux AppImage; install docs for friends | Med |
@@ -636,8 +636,8 @@ Measured with 5,000 tracks in 600 groups: open 30ms, turn grouping on 41ms, scro
 - **Grouping** (`store/grouping.js`): token templates, with By Album and By Artist as presets.
   Headers follow the reference skin: thumbnail, main name in `--highlight`, sub-name, a detail
   line (`Nintendo Switch | mp3 128 kbps | 1 Track | Time: 2:00`, empty segments dropped), and
-  the year. A group with no art gets a lettered block from the palette, the last step of the
-  §5 art chain.
+  the year. A group with no art gets its first track's generated symbol (Phase 6), the last
+  step of the §5 art chain.
 - **Flattened row model** with fixed row heights (track 22px, group 74px). The virtualizer
   (`@tanstack/react-virtual`) renders on-screen rows only. Pointer y maps to a row by binary
   search over cumulative offsets.
@@ -687,3 +687,114 @@ new tab behaviour. Pure modules (`grouping.js`, `bday`, `relink`) have plain-Nod
 All of it now lives in the repo under `tests/` (`npm test`), built on throwaway copies of the
 git-ignored test tracks.
 
+
+---
+
+## 14. Phase 6 — Complete (2026-10-30)
+
+Done-when met: large art with a resizable split, GIF support with the import guardrail, and the
+full art resolution chain. Pulled forward from Phase 7 at the user's request: **Track ▸ Set
+Custom Art… / Clear Custom Art**, so GIFs and the chain can be tried in the app.
+
+### What's built
+
+- **Split** (`App.jsx` `Splitter`): drag the divider, arrow keys when focused, double-click to
+  reset. Stored as a fraction of the window width, so it scales with the window. Floors: art
+  pane ≥ 240px, list ≥ 420px, enforced by CSS `clamp()` as the window resizes and by the drag.
+  View ▸ Show Art Pane hides it; View ▸ Reset Art Pane Size returns to 55%. Both are app-level,
+  in `config.json` (`artPane`), not in any playlist.
+- **Playlist art in the `.bday`** (`bday.mjs`, `playlists.mjs`). Before Phase 6, saving dropped
+  any `art/` entries. Now: documents refer to playlist art as `art/<cache name>`. On open, every
+  `art/` entry is unpacked into the art cache and references are rewritten to it. On save, the
+  referenced images are written back into `art/` (stored, not deflated). A reference to an
+  image that isn't there (or isn't a valid name) is dropped, so the chain falls through.
+  Verified by reopening a saved playlist with the art cache deleted.
+- **Art chain** (`store/art.js`, pure):
+  - track: custom art → embedded art
+  - group header: explicit group art → first track that has art (custom, then embedded) →
+    playlist cover → its first track's generated symbol
+  - art pane: the playing track's art → its group's art (grouped view) → playlist cover →
+    the track's generated symbol
+- **GIF guardrail** (`gif.mjs`, pure JS: `omggif` decodes, `gifenc` encodes; nothing native, so
+  the Windows cross-build is unaffected). Budget **256MB decoded** (w × h × 4 × frames). Over
+  budget, the GIF is re-encoded once at a smaller size, aspect kept, delays, looping and
+  transparency intact. The longest edge never drops below 360px; past that, frames are dropped
+  with their delays merged so the animation runs the same length. Over 50M pixels or 10,000
+  frames is refused outright. Runs in main, yielding between frames, because main also serves
+  the audio stream. Measured: 1200×1000×60 takes ~2.5s, so a 1920×1080×200 monster takes
+  roughly 15s, once, behind a "Preparing art" busy indicator.
+- **Every image entering the cache is checked**: type from magic bytes (never the declared
+  format or extension), 64MB cap, GIFs through the guardrail. Embedded art, picked files and
+  `.bday` entries all take this path. A `.bday` is untrusted input.
+- **GIFs are played by Beachday, not by `<img>`** (`ArtImage.jsx`): frame by frame onto a
+  canvas with Chromium's `ImageDecoder` (WebCodecs), honouring each frame's delay and the GIF's
+  loop count. That's what makes pausing real: a paused GIF holds its frame and resumes from it.
+  Only the frame on screen is decoded, so Chromium's keep-every-frame memory cost (the reason
+  for the guardrail) no longer applies in the app. The guardrail still matters for `.bday`
+  size and for anything else that opens the image.
+- **GIFs pause** when the window loses focus (Options ▸ Pause GIFs When Window Is Unfocused,
+  all GIFs), and the art pane's GIF pauses **with the music** (Options ▸ Pause GIFs When
+  Playback Pauses: paused or stopped). Both are on by default and live in `config.json`. Added
+  after the user's review: a GIF that kept dancing through a paused song felt wrong. Group
+  thumbnails don't follow playback; they aren't the song.
+- **Art pane right-click menu** (after review): Set Custom Art… / Clear Custom Art for the
+  **playing** track (whatever is selected), Jump to Now Playing, Reset Art Pane Size, Show Art
+  Pane, and Pause GIFs When Playback Pauses. Right-click never toggles playback. The menu
+  component is shared with the track list (`ContextMenu.jsx`).
+
+### Decisions made while building
+
+- **Custom art applies to every selected track.** Select an album's tracks → one Set Custom
+  Art… gives them all the same image. One undo step.
+- **Cache names hash the bytes as they came in**, not the downscaled result. So a re-imported
+  oversized GIF isn't re-processed, and `tags.artName` stays valid across machines. A
+  downscaled GIF unpacked from someone's `.bday` gets a new name on the recipient's machine.
+  That's harmless: the reference is rewritten on open.
+- **Saving keeps group entries' other fields.** It used to rebuild `groups` from collapse state
+  alone, which would have erased group art and descriptions (Phase 7).
+- **Generated art is per track, not per group**: a group header shows its first track's symbol.
+- **"Art Only / Lyrics…" stays hidden** until Phase 10: a one-option radio group says nothing.
+- **Not built:** an art-cache sweep (the cache still only grows; PLAN.md §11).
+
+### Testing
+
+`tests/unit/gif.test.mjs` (planning, resize, re-encode with transparency, frame merging,
+refusal) and art-chain checks in `grouping.test.mjs`. `core.test.mjs` round-trips `art/`
+entries through a `.bday`. `tests/e2e/phase6.steps.mjs` (36 checks) drags the real divider,
+sets an over-budget GIF as custom art through the native dialog, checks the GIF holds its
+frame through blur and through a music pause and resumes from that frame, uses the art pane's
+right-click menu with a real right-click, saves, deletes the art cache and reopens (art unpacked from the file), then opens
+a hand-made `.bday` whose cover is an over-budget GIF and whose other references are bogus.
+`E2E_ONLY=6 npm run test:e2e` runs just that suite. A packaged Linux build contains
+`omggif`/`gifenc` and launches.
+
+### Generated default art (after review)
+
+The end of the art chain used to be a lettered square from the palette. It's now a **symbol
+drawn for the track** (`src/renderer/symbols.js`): a flowing, brush-stroke shape in one colour
+family on a transparent background, kept 13% clear of every edge. Designed with the user over
+four sample sheets; references were the Mega Evolution symbol (flowing, standalone) and a free
+"flow" illustration, with crests dropped for looking insectoid.
+
+- **Drawn, not shipped.** Eight recipes (splash, flow, curl, tail, ribbon, twin, wave,
+  planet), each a few rules for laying down strokes: a "walking pen" that turns by a sum of
+  sine waves, thickened by a brush profile, plus each recipe's extras (flicks, droplets,
+  strands, twists, foam, orbits, cut-outs). A seeded RNG (FNV-1a → mulberry32) picks every
+  curve, width and colour, so every track gets its own symbol, not one of a fixed set. ~0.5ms
+  each, a few KB of code, nothing stored. Kept as data: URLs, most recent 300.
+- **Seeded by the audio fingerprint** (`art.js symbolSeed`): the same track gets the same
+  symbol on any machine, through renames and moves, and in a friend's copy of the playlist.
+  Retagging changes the fingerprint (§4), so it changes the symbol. Not fingerprinted: the
+  file name, then the track id.
+- **Colour**: one of 15 saturated hues (deep, vivid or bright) or white, as four shades, used
+  as gradients across the shape or along each stroke (dark root, pale tip).
+- **Wave never closes on itself**: the swoop is relaxed until its lip clears the rest of the
+  stroke (`touchesItself`).
+- **Shown in** the art pane, group header thumbnails (on a `--surface-raised` tile), and the OS
+  media overlay (a 512px PNG on `--bg`, since overlays take no SVG and show transparency badly).
+- **The recipes are now fixed.** Anything that changes how much randomness a recipe consumes
+  changes every track's symbol. Add new recipes at the end of the pool if ever needed, and
+  expect existing symbols to shift then too.
+- Tested: `tests/unit/symbols.test.mjs` (determinism, 400 seeds all inside the padding, no
+  NaN, every recipe appears, seed fallbacks), and the e2e suite checks the pane's symbol is the
+  fingerprint's, the overlay gets a 512px PNG, and an artless group header shows its symbol.

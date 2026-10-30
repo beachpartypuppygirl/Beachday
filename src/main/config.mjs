@@ -19,6 +19,12 @@ const DEFAULTS = {
   restoreTabs: true,
   /** Open tabs at last save: { tabs: [{ filePath, name }], active: index } (PLAN.md §5) */
   session: { tabs: [], active: 0 },
+  /** View ▸ Show Art Pane, and its share of the window width (the draggable split) */
+  artPane: { visible: true, fraction: 0.55 },
+  /** Options ▸ Pause GIFs When Window Is Unfocused */
+  pauseGifs: true,
+  /** Options ▸ Pause GIFs When Playback Pauses */
+  pauseGifsWithPlayback: true,
 };
 
 let configPath = null;

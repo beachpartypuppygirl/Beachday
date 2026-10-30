@@ -54,6 +54,16 @@ contextBridge.exposeInMainWorld('beachday', {
     setRestoreTabs: (restore) => ipcRenderer.invoke('config:set-restore-tabs', restore),
   },
 
+  art: {
+    /** Pick an image for playlist art. Resolves { ref, url } or null. */
+    pick: (title) => ipcRenderer.invoke('art:pick', title),
+  },
+
+  prefs: {
+    get: () => ipcRenderer.invoke('prefs:get'),
+    set: (patch) => ipcRenderer.invoke('prefs:set', patch),
+  },
+
   config: {
     getFolderMappings: () => ipcRenderer.invoke('config:get-mappings'),
     setFolderMappings: (mappings) => ipcRenderer.invoke('config:set-mappings', mappings),

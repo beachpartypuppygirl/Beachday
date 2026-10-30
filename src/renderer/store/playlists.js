@@ -1,5 +1,6 @@
 import { player } from '../audio/engine.js';
 import { buildLayout, moveTracks, moveGroup, PRESETS } from './grouping.js';
+import { artRefUrl, symbolSeed, trackArtUrl } from './art.js';
 
 /**
  * The playlist store (PLAN.md §5 "Playlist tabs", "Undo / redo").
@@ -126,7 +127,8 @@ export function trackView(track, resolution) {
     id: track.id,
     url: resolved?.status === 'ok' ? resolved.url : null,
     missing: resolved?.status !== 'ok',
-    artUrl: resolved?.artUrl ?? null,
+    artUrl: trackArtUrl(track, resolved),
+    symbolSeed: symbolSeed(track),
     title: track.overrides.title || track.tags.title,
     artist: track.tags.artist,
     album: track.tags.album,
@@ -147,14 +149,38 @@ export function layoutOf(playlist) {
     cached &&
     cached.tracks === doc.tracks &&
     cached.grouping === doc.grouping &&
+    cached.groups === doc.groups &&
+    cached.meta === doc.meta &&
     cached.resolution === resolution &&
     cached.collapsed === view.collapsed
   ) {
     return cached.layout;
   }
   const layout = buildLayout(doc, resolution, view.collapsed);
-  layoutCache.set(playlist.id, { tracks: doc.tracks, grouping: doc.grouping, resolution, collapsed: view.collapsed, layout });
+  layoutCache.set(playlist.id, {
+    tracks: doc.tracks,
+    grouping: doc.grouping,
+    groups: doc.groups,
+    meta: doc.meta,
+    resolution,
+    collapsed: view.collapsed,
+    layout,
+  });
   return layout;
+}
+
+/**
+ * What the art pane shows for a track (art.js): its own art, else its group's
+ * (grouped view), else the playlist cover. null: draw the track's symbol.
+ */
+export function paneArtUrl(playlist, trackId) {
+  const track = playlist?.doc.tracks.find((t) => t.id === trackId);
+  if (!track) return null;
+  return (
+    trackArtUrl(track, playlist.resolution[trackId]) ??
+    layoutOf(playlist).groupOf.get(trackId)?.artUrl ??
+    artRefUrl(playlist.doc.meta.cover)
+  );
 }
 
 /** Selected track ids in display order. */
@@ -342,6 +368,22 @@ export function moveGroupTo(id, key, beforeKey) {
   edit(id, 'Move Group', (doc) => {
     const tracks = moveGroup(doc.tracks, layout, key, beforeKey);
     return tracks === doc.tracks ? doc : { ...doc, tracks };
+  });
+}
+
+/** Track ▸ Set Custom Art / Clear Custom Art. `ref` is "art/<name>", or null to clear. */
+export function setTrackArt(id, ids, ref) {
+  const targets = new Set(ids);
+  const label = ref ? 'Set Custom Art' : 'Clear Custom Art';
+  edit(id, label, (doc) => {
+    let changed = false;
+    const tracks = doc.tracks.map((track) => {
+      if (!targets.has(track.id) || (track.overrides.art ?? null) === ref) return track;
+      changed = true;
+      const { art: _, ...overrides } = track.overrides;
+      return { ...track, overrides: ref ? { ...overrides, art: ref } : overrides };
+    });
+    return changed ? { ...doc, tracks } : doc;
   });
 }
 
