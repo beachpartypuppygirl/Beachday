@@ -13,11 +13,13 @@ const listeners = new Set();
 let state = {
   /**
    * null | 'relink' | 'mappings' | 'shortcuts' | 'about' | 'properties' |
-   * 'playlistProperties' | 'gain' | 'grouping' | 'groups'
+   * 'playlistProperties' | 'colors' | 'gain' | 'grouping' | 'groups'
    */
   dialog: null,
   /** What the open dialog is about, e.g. { key } for 'groups', { ids } for 'gain' */
   dialogArgs: null,
+  /** Playlist ▸ Colors: the palette being tried, shown in place of the viewed playlist's */
+  palettePreview: null,
   /** null | { label, fraction? } — a save or import in progress */
   busy: null,
   /** null | string — a short message, cleared after a few seconds */
@@ -61,6 +63,7 @@ export const useUi = () => useSyncExternalStore(subscribe, getState);
 export const openDialog = (dialog, dialogArgs = null) => set({ dialog, dialogArgs });
 export const closeDialog = () => set({ dialog: null, dialogArgs: null });
 export const setBusy = (busy) => set({ busy });
+export const setPalettePreview = (palettePreview) => set({ palettePreview });
 
 export function notify(notice) {
   clearTimeout(noticeTimer);

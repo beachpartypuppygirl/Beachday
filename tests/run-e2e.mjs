@@ -78,6 +78,11 @@ const GROUPS = [
     label: 'e2e8',
     suites: [['phase 8', 'e2e/phase8.steps.mjs']],
   },
+  {
+    // Phase 9: palettes, the Colors dialog, light themes, contrast, suggestions, the palette in the .bday.
+    label: 'e2e9',
+    suites: [['phase 9', 'e2e/phase9.steps.mjs']],
+  },
 ];
 
 // E2E_ONLY=6 runs only the groups with a suite whose name contains "6".

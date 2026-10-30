@@ -339,6 +339,12 @@ button {
   user-select: none;
 }
 
+/* Symbols keep their own colours, some of them pale: a light theme needs an edge. */
+[data-theme="light"] .art--generated,
+[data-theme="light"] .group__art--generated {
+  filter: drop-shadow(0 0 1px rgb(0 0 0 / 0.45));
+}
+
 /* --------------------------------------------------------------------------
    Track list (Phase 3 flat list; Phase 5 virtualizes and groups it)
    -------------------------------------------------------------------------- */
@@ -555,8 +561,14 @@ button {
 
 .track--selected,
 .track--selected:hover {
-  background: color-mix(in srgb, var(--accent) 24%, var(--surface));
+  background: var(--selected);
   color: var(--text-primary);
+}
+
+.track--selected .track__number,
+.track--selected .track__duration,
+.track--selected .track__artist {
+  color: var(--text-secondary);
 }
 
 .tracklist__scroll:focus .track--focus {
@@ -961,6 +973,12 @@ button {
   background: rgb(0 0 0 / 0.55);
 }
 
+/* A live preview: the app stays visible, and the panel keeps clear of the list. */
+.modal--preview {
+  place-items: center start;
+  background: rgb(0 0 0 / 0.12);
+}
+
 .modal__panel {
   display: flex;
   flex-direction: column;
@@ -1062,6 +1080,104 @@ button {
 .form__note {
   margin: 12px 0 0;
   font-size: 12px;
+}
+
+/* Colors: a row per colour, then starting points. */
+.colors {
+  display: grid;
+  gap: 10px;
+}
+
+.colors__row {
+  display: grid;
+  grid-template-columns: 44px 1fr 92px;
+  align-items: center;
+  gap: 12px;
+}
+
+.colors__swatch {
+  width: 44px;
+  height: 30px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: none;
+  cursor: pointer;
+}
+
+.colors__swatch::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.colors__swatch::-webkit-color-swatch {
+  border: none;
+}
+
+.colors__role {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.colors__hint {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.colors__note {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.colors__hex {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.colors__hex--bad,
+.colors__hex--bad:focus {
+  border-color: var(--accent);
+  border-style: dashed;
+}
+
+.presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.preset {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.preset:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+.preset--on {
+  border-color: var(--highlight);
+  color: var(--text-primary);
+}
+
+.preset__chips {
+  display: flex;
+  overflow: hidden;
+  border-radius: 3px;
+}
+
+.preset__chip {
+  width: 11px;
+  height: 18px;
 }
 
 /* Playlist properties: fields beside the cover. */
@@ -1219,7 +1335,7 @@ button {
 
 .groupedit__item--selected,
 .groupedit__item--selected:hover {
-  background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+  background: var(--selected);
 }
 
 .groupedit__names {
@@ -1372,7 +1488,7 @@ kbd {
 
 .group--selected,
 .group--selected:hover {
-  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  background: var(--selected-soft);
 }
 
 .group--playing {

@@ -8,6 +8,7 @@ import { player } from '../audio/engine.js';
 import { artRefUrl } from '../store/art.js';
 import { GAIN_MAX_DB, GAIN_MIN_DB, clampGain, formatGain, seedGainDb, trackGainDb } from '../store/gain.js';
 import { PRESETS, SUB_LINES, TOKENS, applyGroupEdits, buildLayout } from '../store/grouping.js';
+import { DEFAULT_PALETTE, PALETTE_PRESETS, deriveTheme, normalizePalette, parseHex, samePalette } from '../store/theme.js';
 import ArtImage from './ArtImage.jsx';
 import { GroupHeader } from './TrackList.jsx';
 
@@ -22,13 +23,14 @@ export default function Dialogs() {
   if (dialog === 'about') return <AboutDialog />;
   if (dialog === 'properties') return <PropertiesDialog />;
   if (dialog === 'playlistProperties') return <PlaylistPropertiesDialog />;
+  if (dialog === 'colors') return <ColorsDialog />;
   if (dialog === 'gain') return <GainDialog />;
   if (dialog === 'grouping') return <GroupingDialog />;
   if (dialog === 'groups') return <GroupsDialog />;
   return null;
 }
 
-function Modal({ title, children, footer, wide = false, className = '' }) {
+function Modal({ title, children, footer, wide = false, className = '', preview = false }) {
   const panelRef = useRef(null);
 
   useEffect(() => {
@@ -44,7 +46,7 @@ function Modal({ title, children, footer, wide = false, className = '' }) {
   }, []);
 
   return (
-    <div className="modal" onPointerDown={(event) => event.target === event.currentTarget && ui.closeDialog()}>
+    <div className={`modal${preview ? ' modal--preview' : ''}`} onPointerDown={(event) => event.target === event.currentTarget && ui.closeDialog()}>
       <div className={`modal__panel${wide ? ' modal__panel--wide' : ''} ${className}`} role="dialog" aria-modal="true" aria-label={title} ref={panelRef}>
         <h2 className="modal__title">{title}</h2>
         <div className="modal__body">{children}</div>
@@ -354,6 +356,145 @@ function PlaylistPropertiesDialog() {
       </div>
       <p className="modal__text modal__text--muted form__note">
         Saved inside the playlist, cover included, so they travel with it.
+      </p>
+    </Modal>
+  );
+}
+
+// --- Colors (Playlist ▸ Colors…) ---------------------------------------------
+
+const COLOR_ROLES = [
+  { role: 'primary', label: 'Primary', hint: 'Background: window, panels, menus' },
+  { role: 'secondary', label: 'Secondary', hint: 'Accent: buttons, selected rows, active tab' },
+  { role: 'tertiary', label: 'Tertiary', hint: 'Highlight: group names, seek bar, transport' },
+];
+
+/** One colour: the native picker, and its hex to type or paste. */
+function ColorField({ label, hint, value, used, autoFocus, onChange, onEnter }) {
+  const [text, setText] = useState(value);
+  // Keep what's being typed ("#abc") unless the colour really changed elsewhere.
+  useEffect(() => {
+    if (parseHex(text) !== value) setText(value);
+  }, [value]);
+  const type = (next) => {
+    setText(next);
+    const parsed = parseHex(next);
+    if (parsed) onChange(parsed);
+  };
+  return (
+    <div className="colors__row">
+      <input className="colors__swatch" type="color" value={value} aria-label={`${label} colour`} onChange={(e) => type(e.target.value)} />
+      <span className="colors__role">
+        {label}
+        <span className="colors__hint">{hint}</span>
+        {used !== value && <span className="colors__note">Shown as {used}, to stay readable</span>}
+      </span>
+      <input
+        className={`field colors__hex${parseHex(text) ? '' : ' colors__hex--bad'}`}
+        data-autofocus={autoFocus ? true : undefined}
+        value={text}
+        spellCheck={false}
+        aria-label={`${label} hex`}
+        onChange={(e) => type(e.target.value)}
+        onBlur={() => setText(value)}
+        onKeyDown={(e) => e.key === 'Enter' && onEnter()}
+      />
+    </div>
+  );
+}
+
+function PaletteChips({ palette }) {
+  return (
+    <span className="preset__chips" aria-hidden="true">
+      {COLOR_ROLES.map(({ role }) => (
+        <span key={role} className="preset__chip" style={{ background: palette[role] }} />
+      ))}
+    </span>
+  );
+}
+
+function ColorsDialog() {
+  const playlist = viewedPlaylist(useSyncExternalStore(store.subscribe, store.getState));
+  // null: this playlist uses the default colours.
+  const [draft, setDraft] = useState(() => normalizePalette(playlist.doc.palette));
+  const [suggestion, setSuggestion] = useState(null);
+  const colors = draft ?? DEFAULT_PALETTE;
+  const { mode, used } = deriveTheme(colors);
+  const artUrl = actions.paletteArtUrl(playlist);
+
+  // The whole app is the preview; Cancel just lets go of it.
+  useEffect(() => ui.setPalettePreview(colors), [colors]);
+  useEffect(() => () => ui.setPalettePreview(null), []);
+
+  const choose = (palette) => {
+    setDraft(palette);
+    setSuggestion(null);
+  };
+  const apply = () => {
+    store.setPalette(playlist.id, draft);
+    ui.closeDialog();
+  };
+  // Each click moves to the next reading of the art.
+  const suggest = async () => {
+    const list = suggestion?.list ?? (await actions.suggestFromArt(artUrl));
+    if (!list.length) return setSuggestion({ list, index: -1 });
+    const index = suggestion ? (suggestion.index + 1) % list.length : 0;
+    setDraft(list[index]);
+    setSuggestion({ list, index });
+  };
+
+  const message = !suggestion
+    ? `A ${mode} theme.`
+    : suggestion.index < 0
+      ? 'That art couldn’t be read.'
+      : `Suggestion ${suggestion.index + 1} of ${suggestion.list.length}. Click again for another.`;
+
+  return (
+    <Modal
+      title="Playlist colors"
+      preview
+      footer={
+        <>
+          <span className="modal__message">{message}</span>
+          <button className="button button--quiet" type="button" onClick={ui.closeDialog}>
+            Cancel
+          </button>
+          <button className="button" type="button" onClick={apply}>
+            Apply
+          </button>
+        </>
+      }
+    >
+      <div className="colors">
+        {COLOR_ROLES.map(({ role, label, hint }, i) => (
+          <ColorField
+            key={role}
+            label={label}
+            hint={hint}
+            value={colors[role]}
+            used={used[role]}
+            autoFocus={i === 0}
+            onChange={(value) => choose({ ...colors, [role]: value })}
+            onEnter={apply}
+          />
+        ))}
+      </div>
+      <h3 className="modal__section">Start from</h3>
+      <div className="presets">
+        {PALETTE_PRESETS.map(({ name, palette }) => (
+          <button key={name} className={`preset${samePalette(palette, colors) ? ' preset--on' : ''}`} type="button" onClick={() => choose(palette === DEFAULT_PALETTE ? null : palette)}>
+            <PaletteChips palette={palette} />
+            {name}
+          </button>
+        ))}
+      </div>
+      <p className="artpick__actions form__note">
+        <button className="button button--quiet" type="button" disabled={!artUrl} title={artUrl ? undefined : 'This playlist has no art yet'} onClick={suggest}>
+          Suggest from Art
+        </button>
+      </p>
+      <p className="modal__text modal__text--muted form__note">
+        Saved inside the playlist, so they travel with it. Beachday only shifts a colour if text wouldn’t be readable on it.
       </p>
     </Modal>
   );

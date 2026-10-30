@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import TitleBar from './components/TitleBar.jsx';
 import TrackList from './components/TrackList.jsx';
 import Transport from './components/Transport.jsx';
@@ -10,6 +10,7 @@ import { handleShortcut, runCommand, ART_CONTEXT_ITEMS } from './menus/commands.
 import { requestAppClose, restoreSession } from './store/actions.js';
 import * as store from './store/playlists.js';
 import { useUi, loadPrefs, setArtPane, DEFAULT_ART_FRACTION } from './store/ui.js';
+import { applyTheme } from './store/theme.js';
 import { symbolUrl } from './symbols.js';
 
 /**
@@ -49,6 +50,7 @@ export default function App() {
 
   return (
     <div className="app">
+      <ThemeSync />
       <TitleBar />
 
       <main
@@ -84,6 +86,19 @@ export default function App() {
       {artMenu && <ContextMenu at={artMenu} items={ART_CONTEXT_ITEMS} onClose={() => setArtMenu(null)} />}
     </div>
   );
+}
+
+/**
+ * The theme follows the viewed tab (the art pane keeps showing what's playing),
+ * or the palette being tried in Playlist ▸ Colors. Its own component, because
+ * it has to re-render with every change to the store and the shell shouldn't.
+ */
+function ThemeSync() {
+  const { playlists, viewedId } = useSyncExternalStore(store.subscribe, store.getState);
+  const { palettePreview } = useUi();
+  const palette = palettePreview ?? playlists[viewedId]?.doc.palette ?? null;
+  useLayoutEffect(() => applyTheme(palette), [palette]);
+  return null;
 }
 
 /** The fraction of the workspace's width at `clientX`, within the pixel floors. */

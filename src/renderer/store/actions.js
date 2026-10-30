@@ -1,6 +1,8 @@
 import * as store from './playlists.js';
 import * as ui from './ui.js';
 import { player } from '../audio/engine.js';
+import { trackArtUrl, artRefUrl } from './art.js';
+import { suggestPalettes } from './theme.js';
 
 /**
  * User-level flows that span the store, main and dialogs: tabs, open, save,
@@ -370,6 +372,34 @@ export async function pickArt(title) {
 
 /** Clear Custom Art: back to embedded art (or the rest of the chain). */
 export const clearCustomArt = (id, ids) => store.setTrackArt(id, ids, null);
+
+// --- Colors (PLAN.md §5 "Theming") -------------------------------------------
+
+/** The image a playlist's colours are suggested from: its cover, what's playing from it, its first art. */
+export function paletteArtUrl(playlist) {
+  const { doc, resolution, id } = playlist;
+  const artOf = (track) => trackArtUrl(track, resolution[track.id]);
+  const playingId = store.getState().playingId === id ? player.getState().current?.id : null;
+  const playing = doc.tracks.find((track) => track.id === playingId);
+  return artRefUrl(doc.meta.cover) ?? (playing && artOf(playing)) ?? doc.tracks.map(artOf).find(Boolean) ?? null;
+}
+
+const PALETTE_SAMPLE_SIZE = 64;
+
+/** Palettes suggested from an art image (a GIF's first frame); [] if it can't be read. */
+export async function suggestFromArt(url) {
+  try {
+    const blob = await (await fetch(url)).blob();
+    const size = PALETTE_SAMPLE_SIZE;
+    const bitmap = await createImageBitmap(blob, { resizeWidth: size, resizeHeight: size, resizeQuality: 'medium' });
+    const context = new OffscreenCanvas(size, size).getContext('2d', { willReadFrequently: true });
+    context.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    return suggestPalettes(context.getImageData(0, 0, size, size).data);
+  } catch {
+    return [];
+  }
+}
 
 // --- Groups (PLAN.md §5 "Grouping") ------------------------------------------
 

@@ -67,11 +67,17 @@ function documentFromManifest(manifest, filePath) {
       author: manifest.meta?.author ?? '',
       cover: manifest.meta?.cover ?? null,
     },
-    palette: manifest.palette ?? null,
+    palette: validPalette(manifest.palette),
     grouping: manifest.grouping ?? null,
     groups: Array.isArray(manifest.groups) ? manifest.groups.filter((group) => group && typeof group === 'object') : [],
     tracks,
   };
+}
+
+/** A .bday is untrusted input: three "#rrggbb" colours, or no palette at all. */
+function validPalette(palette) {
+  const colors = ['primary', 'secondary', 'tertiary'].map((role) => [role, palette?.[role]]);
+  return colors.every(([, color]) => typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color)) ? Object.fromEntries(colors) : null;
 }
 
 /**

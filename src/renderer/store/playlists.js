@@ -2,6 +2,7 @@ import { player } from '../audio/engine.js';
 import { applyGroupEdits, buildLayout, moveTracks, moveGroup, newCustomKey, pinTracks, PRESETS, withChains } from './grouping.js';
 import { artRefUrl, symbolSeed, trackArtUrl } from './art.js';
 import { clampGain, trackGainDb } from './gain.js';
+import { DEFAULT_PALETTE, normalizePalette, samePalette } from './theme.js';
 
 /**
  * The playlist store (PLAN.md §5 "Playlist tabs", "Undo / redo").
@@ -496,6 +497,15 @@ export function setMeta(id, meta) {
   edit(id, 'Edit Playlist Properties', (doc) => {
     const next = { ...doc.meta, ...meta };
     return JSON.stringify(next) === JSON.stringify(doc.meta) ? doc : { ...doc, meta: next };
+  });
+}
+
+/** Playlist ▸ Colors. The default palette is stored as none, so a playlist can return to it. */
+export function setPalette(id, palette) {
+  const next = palette && !samePalette(palette, DEFAULT_PALETTE) ? normalizePalette(palette) : null;
+  edit(id, 'Change Colors', (doc) => {
+    const same = next && doc.palette ? samePalette(next, doc.palette) : next === doc.palette;
+    return same ? doc : { ...doc, palette: next };
   });
 }
 

@@ -120,7 +120,7 @@ Acts on the open playlist ⏳ (the viewed tab, once tabs land).
 | Item | Phase |
 |---|---|
 | Properties… (name, description, author, cover) | 7 |
-| Colors… (three-color palette) | 9 |
+| Colors… (three-color palette, presets, Suggest from Art) | 9 |
 | — | |
 | Grouping ▸ Off / By Album / By Artist / Custom Groups Only / Custom… (template editor with live preview) | 5 / 7 |
 | Edit Groups… (header lines, description, art; dissolve a custom group) | 7 |
@@ -224,10 +224,10 @@ Designed in `PLAN.md` §5 (2026-10-28). Menu effects:
 ## Implementation notes
 
 **Built in Phase 4** from the table in `src/renderer/menus/commands.js`; Phase 5 added the
-selection-based items, Phase 6 the art pane items, Phase 7 the metadata items, Phase 8 playback order and links. Live now: all of File (incl. Close / Next /
+selection-based items, Phase 6 the art pane items, Phase 7 the metadata items, Phase 8 playback order and links, Phase 9 Colors. Live now: all of File (incl. Close / Next /
 Previous Tab), all of Edit except Find, View (Show Art Pane, Reset Art Pane Size, Collapse/Expand
 All, Jump to Now Playing, Zoom), all of Playback,
-Playlist ▸ Properties…, Grouping (Off / By Album / By Artist / Custom Groups Only / Custom…), Edit Groups…, Storage and
+Playlist ▸ Properties…, Colors…, Grouping (Off / By Album / By Artist / Custom Groups Only / Custom…), Edit Groups…, Storage and
 Relink, all of Track except Fetch Lyrics (Phase 10), Options ▸ Folder Mappings,
 Restore Tabs on Startup, Show Track Shapes Instead of Art, Pause GIFs When Window Is Unfocused and Pause GIFs When Playback
 Pauses, and Help. View ▸ Art Pane ▸

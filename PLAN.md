@@ -2,7 +2,7 @@
 
 Audio player and playlist curation tool for local music files. Linux + Windows.
 
-**Status:** Phases 1–8 complete; Phase 9 next.
+**Status:** Phases 1–9 complete; Phase 10 next.
 **Last updated:** 2026-10-30
 
 ---
@@ -141,7 +141,7 @@ with ` (2)` on collisions); its fingerprint equals the loose file's.
   "formatVersion": 1,
   "bundled": false,
   "meta": { "name": "", "description": "", "author": "", "cover": "art/cover.png" },
-  "palette": { "primary": "#e8766b", "secondary": "#1a1a1a", "tertiary": "#f0c040" },
+  "palette": { "primary": "#14110f", "secondary": "#e8766b", "tertiary": "#f0c040" },  // null: the default
   "grouping": {
     "enabled": true,
     "groupKey": "%albumartist% / %album%",
@@ -287,6 +287,9 @@ directly to UI surfaces. Derive a token set:
 Run a WCAG contrast check on each text/background pairing and auto-adjust lightness when one
 fails. Otherwise someone picks three pastels and the app becomes illegible.
 
+**Roles (decided 2026-10-30):** primary is the background family, secondary the accent, tertiary
+the highlight. Light themes are allowed and follow the colour. Built in Phase 9; see §17.
+
 ### Inter-track gap
 
 True sample-accurate gapless is **out of scope** — it needs Web Audio buffer scheduling with
@@ -391,7 +394,7 @@ should land while the codebase is small.
 | 6 | **Art pane** — **DONE** | Large art with resizable split; GIF support with import guardrail; art resolution chain | Med |
 | 7 | **Playlist-side metadata** — **DONE** | Per-track rename / dB (custom art landed in Phase 6); playlist name, description, author, cover; subgroup editor | Med |
 | 8 | **Shuffle + links** — **DONE** | Permutation-cursor shuffle; shuffle-remaining; contiguous chains with multi-select Link/Unlink; mid-chain click behaviour; repeat modes | Med |
-| 9 | **Theming** | Per-playlist palette picker; derived tokens; contrast validation | Med |
+| 9 | **Theming** — **DONE** | Per-playlist palette picker; derived tokens; contrast validation | Med |
 | 10 | **Lyrics + packaging** | LRCLIB fetch with toggle; art-pane lyrics modes; Windows zip + Linux AppImage; install docs for friends | Med |
 
 ---
@@ -979,3 +982,67 @@ to ~70ms, with no code regression behind it.
 Test audio moved out of the project to `~/Desktop/audiotracks` (21 tracks; the tests use
 three of them). `tests/fixtures.mjs` reads from there, or `$BEACHDAY_TEST_AUDIO`.
 
+---
+
+## 17. Phase 9 — Complete (2026-10-30)
+
+Done-when met: a per-playlist palette picker, derived tokens, and contrast validation, undoable
+and carried in the `.bday`.
+
+### What's built
+
+- **Roles** (the user's call): **primary = background family**, **secondary = accent**,
+  **tertiary = highlight**. This differs from the old §4 sketch and from Phases 1–8's
+  stand-ins, which had the accent as "primary". No saved playlist has a palette yet, so
+  nothing needs migrating.
+- **Derivation** (`store/theme.js`, pure): palette in, tokens out. A pale primary makes a light
+  theme by luminance alone; there's no mode to set. Surfaces step from `--bg` towards the text.
+  `tokens.css` is the default palette's derivation written out, so there's one source of truth
+  (a unit test keeps them equal). The default look moved by a couple of RGB values at most.
+- **Contrast**: `PAIRINGS` lists every promise (22 pairings: 4.5:1 for text, 3:1 for quiet
+  text and borders). Only lightness moves, so a colour keeps its hue. The background keeps the
+  exact colour picked unless its text can't read across all its surfaces (a mid-tone colour
+  moves; `INK_ROOM` leaves secondary and muted text room to stay quieter than primary text).
+- **Playlist ▸ Colors…**: a native picker and a hex field per colour, eight presets (three
+  light), Suggest from Art, and a note on any colour that was shifted ("Shown as #…, to stay
+  readable"). The whole app is the live preview, so the dialog sits left of the list with a
+  much lighter backdrop. Cancel lets the preview go; Apply is one undo step, Change Colors.
+- **Suggest from Art**: reads the cover, else the playing track's art, else the first art in
+  the playlist (a GIF's first frame), sampled at 64×64. Each click gives the next of three
+  readings: deep, light, bold. Picking colours is `suggestPalettes` (pure); the decoding is in
+  `actions.js`.
+- **Theme follows the viewed tab** (`ThemeSync` in `App.jsx`), and sets `color-scheme` so
+  scrollbars and native controls match.
+
+### Decisions made while building
+
+- **Selected rows are tokens** (`--selected`, `--selected-soft`), replacing `color-mix()` in
+  CSS: a tint the stylesheet mixes can't be contrast-checked. The tint weakens when text
+  wouldn't read on it.
+- **`--accent-contrast` is the background itself where that reads**, and also sits on
+  highlight fills, which is why it's checked against accent, accent hover and highlight.
+- **The default palette is stored as `null`**, so choosing the Beachday preset returns a
+  playlist to no palette at all. There's no separate Reset button.
+- **Dark themes get `--bg` as their deepest layer, light themes as their palest.**
+- **A malformed palette in a `.bday` is dropped whole** (`validPalette` in `playlists.mjs`):
+  three `#rrggbb` strings, or none. Derivation only ever parses hex, so nothing raw reaches CSS.
+- **Generated symbols keep their own colours**, with a thin drop-shadow in light themes so
+  pale ones keep an edge.
+- **Selected rows show numbers, durations and artists in `--text-secondary`**, since muted text
+  isn't promised on the tint.
+- **The playlist cover ignores Show Track Shapes** (the user's call): it's the playlist's own
+  picture, not a track's.
+- Not built: the window's pre-paint `backgroundColor` stays the default dark, so a light
+  playlist restored at launch shows dark until its tab has loaded. The OS overlay's symbol PNG
+  takes `--bg` when the track starts, so it doesn't repaint if the theme changes mid-track.
+
+### Testing
+
+`tests/unit/theme.test.mjs`: hex parsing, normalization, `tokens.css` against the derivation,
+presets needing no adjustment, every pairing across 7,728 palettes (12³ hostile combinations
+plus 6,000 seeded random ones, which caught a real miss: secondary text at 2.97:1 on a selected
+row), light themes, lightness-only moves, and suggestions (including greyscale and fully
+transparent images). `tests/e2e/phase9.steps.mjs` (23 checks): live preview, Escape, half-typed
+and three-digit hex, the native picker, Enter, real Ctrl+Z / Ctrl+Y, a light preset, the
+"Shown as" note, Suggest from Art off and cycling on real embedded art, back to no palette,
+following the viewed tab with playback carrying on, save, close and reopen, a malformed palette.

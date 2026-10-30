@@ -4,40 +4,41 @@
  * PLAN.md §5 "Theming — derive, don't slot": a playlist supplies three raw
  * colors (primary / secondary / tertiary). Those are NEVER bound directly to
  * UI surfaces — three arbitrary colors will produce unreadable pairings.
- * Instead they feed the derived token set below, which is what components use.
+ * store/theme.js derives the set below from them, with a WCAG contrast check,
+ * and sets it on the page for the viewed tab. Components read only these.
  *
- * Phase 9 adds the derivation step (and the WCAG contrast check that adjusts
- * lightness when a pairing fails). Until then these are hand-authored defaults
- * standing in for generated output, so every component built in Phases 1-8 is
- * already reading from the right layer and needs no retrofit.
+ * The colors here are that derivation of the default palette, written out so
+ * the app is right before the first render. A unit test keeps them equal; to
+ * change the default look, change DEFAULT_PALETTE and copy the output here.
  */
 
 :root {
-  /* --- Raw playlist palette (Phase 9 overwrites these per playlist) --- */
-  --palette-primary: #e8766b;
-  --palette-secondary: #2b2320;
-  --palette-tertiary: #f0c040;
+  color-scheme: dark;
 
   /* --- Derived surfaces --- */
   --bg: #14110f;
-  --surface: #1c1816;
-  --surface-raised: #272120;
-  --surface-hover: #332b28;
+  --surface: #1d1816;
+  --surface-raised: #28221e;
+  --surface-hover: #342c27;
 
   /* --- Derived text --- */
-  --text-primary: #f2ece8;
-  --text-secondary: #b8aba4;
-  --text-muted: #7d716b;
+  --text-primary: #f0edeb;
+  --text-secondary: #b8aba3;
+  --text-muted: #7d726b;
 
   /* --- Derived accents --- */
-  --accent: var(--palette-primary);
-  --accent-hover: #f08c82;
+  --accent: #e8766b;
+  --accent-hover: #eb8a81;
   --accent-contrast: #14110f;
-  --highlight: var(--palette-tertiary);
+  --highlight: #f0c040;
+
+  /* --- Selected rows --- */
+  --selected: #4e2f2a;
+  --selected-soft: #3d2724;
 
   /* --- Lines --- */
-  --border: #332b28;
-  --border-strong: #463b37;
+  --border: #342c27;
+  --border-strong: #473c35;
 
   /* --- Chrome --- */
   --titlebar-height: 34px;

@@ -265,6 +265,7 @@ export const COMMANDS = {
     run: () => ui.openDialog('grouping'),
   },
   'playlist.properties': { label: 'Properties…', enabled: ready, run: () => ui.openDialog('playlistProperties') },
+  'playlist.colors': { label: 'Colors…', enabled: ready, run: () => ui.openDialog('colors') },
   'playlist.editGroups': {
     label: 'Edit Groups…',
     enabled: (ctx) => grouped(ctx) && ctx.playlist.doc.tracks.length > 0,
@@ -572,6 +573,7 @@ export const MENUS = [
     label: 'Playlist',
     items: [
       'playlist.properties',
+      'playlist.colors',
       '-',
       {
         label: 'Grouping',
