@@ -148,6 +148,8 @@ class Player {
     repeat: loadSetting(REPEAT_KEY, ['off', 'all', 'one']),
     /** Playback ▸ Stop After Current: stop when this track ends (then it switches itself off) */
     stopAfterCurrent: false,
+    /** The track being prepared to play next (the final seconds of this one), or null */
+    upcoming: null,
   };
 
   /**
@@ -515,6 +517,7 @@ class Player {
       status: 'playing',
       duration: Number.isFinite(duration) ? duration : 0,
       error: null,
+      upcoming: null,
     });
     this.#updateMediaSession(track);
     this.#playActive();
@@ -546,7 +549,10 @@ class Player {
     if (stopAfterCurrent) return;
     const target = this.#nextTarget({ ended: true, peek: true });
     // Repeat One restarts the playing deck; nothing to preload.
-    if (target >= 0 && target !== index && !this.#idle.holds(queue[target])) this.#idle.load(queue[target]);
+    if (target >= 0 && target !== index && !this.#idle.holds(queue[target])) {
+      this.#idle.load(queue[target]);
+      this.#set({ upcoming: queue[target] });
+    }
   }
 
   #advance() {

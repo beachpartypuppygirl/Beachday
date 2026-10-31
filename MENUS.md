@@ -76,6 +76,7 @@ per playlist.
 | Item | Shortcut | Phase |
 |---|---|---|
 | Art Pane ▸ **Art Only** / **Lyrics Only** / **Lyrics Over Art** | | 10 ✦ |
+| Art Pane ▸ Dim Art Behind Lyrics (on/off, default on) | | 10 |
 | Show Art Pane (toggle) | | 6 |
 | Reset Art Pane Size (also: double-click the divider) | | 6 |
 | — | | |
@@ -144,7 +145,8 @@ Acts on the selected track(s). **The track list's right-click menu shows the sam
 | Unlink (the selected tracks leave their chains) | Ctrl+Shift+L | 8 |
 | Move to Group ▸ (every group, New Group…, By Tags (Automatic); pins `groupId`. With grouping off, just New Group…, which turns on Custom Groups Only) | | 7 |
 | — | | |
-| Fetch Lyrics | | 10 |
+| Fetch Lyrics (one track) | | 10 |
+| Edit Lyrics… (saved in the playlist) | | 10 |
 | Show in File Manager | | 3 |
 | Properties… (read-only tags) | Alt+Enter | 3 / 5 |
 | — | | |
@@ -182,6 +184,9 @@ whatever is selected in the list. Left-click on the art still toggles playback.
 |---|---|
 | Set Custom Art… | 6 |
 | Clear Custom Art | 6 |
+| Fetch Lyrics / Edit Lyrics… | 10 |
+| — | |
+| Art Pane ▸ (the View menu's modes) | 10 |
 | — | |
 | Jump to Now Playing | 5 |
 | Reset Art Pane Size | 6 |
@@ -224,14 +229,13 @@ Designed in `PLAN.md` §5 (2026-10-28). Menu effects:
 ## Implementation notes
 
 **Built in Phase 4** from the table in `src/renderer/menus/commands.js`; Phase 5 added the
-selection-based items, Phase 6 the art pane items, Phase 7 the metadata items, Phase 8 playback order and links, Phase 9 Colors. Live now: all of File (incl. Close / Next /
+selection-based items, Phase 6 the art pane items, Phase 7 the metadata items, Phase 8 playback order and links, Phase 9 Colors, Phase 10 lyrics and Help. Live now: all of File (incl. Close / Next /
 Previous Tab), all of Edit except Find, View (Show Art Pane, Reset Art Pane Size, Collapse/Expand
 All, Jump to Now Playing, Zoom), all of Playback,
 Playlist ▸ Properties…, Colors…, Grouping (Off / By Album / By Artist / Custom Groups Only / Custom…), Edit Groups…, Storage and
-Relink, all of Track except Fetch Lyrics (Phase 10), Options ▸ Folder Mappings,
+Relink, all of Track, Options ▸ Fetch Lyrics Automatically, Folder Mappings,
 Restore Tabs on Startup, Show Track Shapes Instead of Art, Pause GIFs When Window Is Unfocused and Pause GIFs When Playback
-Pauses, and Help. View ▸ Art Pane ▸
-(display modes) stays hidden until Phase 10 brings lyrics; until then Art Only is the only mode. Right-clicking a track opens the Track menu plus
+Pauses, View ▸ Art Pane, and all of Help. Right-clicking a track opens the Track menu plus
 Cut / Copy / Paste / Remove; right-clicking a group header opens the group menu. Double-clicking
 the playlist header opens Playlist ▸ Properties. The empty playlist view keeps Add files/folder buttons as a
 convenience.

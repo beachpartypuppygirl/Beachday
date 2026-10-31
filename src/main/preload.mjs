@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('beachday', {
     /** Main asks before the window closes; answer with confirmClose() when it's safe. */
     onCloseRequested: (callback) => subscribe('app:close-requested', callback),
     confirmClose: () => ipcRenderer.invoke('app:confirm-close'),
+    openLogs: () => ipcRenderer.invoke('app:open-logs'),
   },
 
   playlist: {
@@ -57,6 +58,13 @@ contextBridge.exposeInMainWorld('beachday', {
   art: {
     /** Pick an image for playlist art. Resolves { ref, url } or null. */
     pick: (title) => ipcRenderer.invoke('art:pick', title),
+  },
+
+  lyrics: {
+    /** What's stored on this computer for a track, or null. Never touches the network. */
+    cached: (query) => ipcRenderer.invoke('lyrics:cached', query),
+    /** Ask LRCLIB. */
+    fetch: (query) => ipcRenderer.invoke('lyrics:fetch', query),
   },
 
   prefs: {

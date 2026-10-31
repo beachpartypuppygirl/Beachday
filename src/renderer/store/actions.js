@@ -3,6 +3,7 @@ import * as ui from './ui.js';
 import { player } from '../audio/engine.js';
 import { trackArtUrl, artRefUrl } from './art.js';
 import { suggestPalettes } from './theme.js';
+import { fetchNow, prepareWanted } from './lyrics.js';
 
 /**
  * User-level flows that span the store, main and dialogs: tabs, open, save,
@@ -399,6 +400,29 @@ export async function suggestFromArt(url) {
   } catch {
     return [];
   }
+}
+
+// --- Lyrics (PLAN.md §18) ----------------------------------------------------
+
+/** Track ▸ Fetch Lyrics: one track, on request. */
+export async function fetchTrackLyrics(playlist, trackId) {
+  const track = playlist.doc.tracks.find((t) => t.id === trackId);
+  if (!track) return;
+  const view = store.trackView(track, playlist.resolution);
+  const { status } = await fetchNow(view);
+  const notices = {
+    found: `Lyrics found for "${view.title}".`,
+    instrumental: `"${view.title}" is marked as instrumental.`,
+    none: `No lyrics found for "${view.title}".`,
+    unavailable: 'Couldn’t reach the lyrics service. Try again in a little while.',
+  };
+  ui.notify(notices[status]);
+}
+
+export function toggleFetchLyrics() {
+  const on = !ui.getState().fetchLyrics;
+  ui.setFetchLyrics(on);
+  if (on) prepareWanted();
 }
 
 // --- Groups (PLAN.md §5 "Grouping") ------------------------------------------

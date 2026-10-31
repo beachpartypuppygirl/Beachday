@@ -14,3 +14,6 @@ npm-debug.log*
 *.opus
 *.m4a
 *.aac
+
+# The UI reference: someone else's skin, so kept local
+example (foobar2k skin).png

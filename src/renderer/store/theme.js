@@ -19,7 +19,7 @@
  */
 
 /** Used by every playlist with `palette: null`. */
-export const DEFAULT_PALETTE = { primary: '#14110f', secondary: '#e8766b', tertiary: '#f0c040' };
+export const DEFAULT_PALETTE = { primary: '#14110f', secondary: '#4fc9a9', tertiary: '#f07fbf' };
 
 /** Starting points in the Colors dialog. */
 export const PALETTE_PRESETS = [

@@ -43,6 +43,9 @@ export function getContext() {
     pauseGifs: ui.getState().pauseGifs,
     pauseGifsWithPlayback: ui.getState().pauseGifsWithPlayback,
     showShapes: ui.getState().showShapes,
+    artPaneMode: ui.getState().artPaneMode,
+    dimLyricsArt: ui.getState().dimLyricsArt,
+    fetchLyrics: ui.getState().fetchLyrics,
     nowPlaying: playingTrack ? { playlist: playlists[playingId], track: playingTrack } : null,
     busy: Boolean(ui.getState().busy),
   };
@@ -160,6 +163,15 @@ export const COMMANDS = {
     label: 'Reset Art Pane Size',
     enabled: (ctx) => ctx.artPane.visible && ctx.artPane.fraction !== ui.DEFAULT_ART_FRACTION,
     run: actions.resetArtPane,
+  },
+  'view.artMode.art': { label: 'Art Only', checked: (ctx) => ctx.artPaneMode === 'art', run: () => ui.setArtPaneMode('art') },
+  'view.artMode.lyrics': { label: 'Lyrics Only', checked: (ctx) => ctx.artPaneMode === 'lyrics', run: () => ui.setArtPaneMode('lyrics') },
+  'view.artMode.over': { label: 'Lyrics Over Art', checked: (ctx) => ctx.artPaneMode === 'over', run: () => ui.setArtPaneMode('over') },
+  'view.dimArt': {
+    label: 'Dim Art Behind Lyrics',
+    checked: (ctx) => ctx.dimLyricsArt,
+    enabled: (ctx) => ctx.artPaneMode === 'over',
+    run: (ctx) => ui.setDimLyricsArt(!ctx.dimLyricsArt),
   },
   'view.collapseAll': {
     label: 'Collapse All Groups',
@@ -350,6 +362,16 @@ export const COMMANDS = {
       ctx.selected.some((id) => ctx.playlist.doc.tracks.find((track) => track.id === id)?.overrides.art),
     run: (ctx) => actions.clearCustomArt(ctx.playlist.id, ctx.selected),
   },
+  'track.fetchLyrics': {
+    label: 'Fetch Lyrics',
+    enabled: (ctx) => ready(ctx) && ctx.selected.length === 1,
+    run: (ctx) => actions.fetchTrackLyrics(ctx.playlist, ctx.selected[0]),
+  },
+  'track.editLyrics': {
+    label: 'Edit Lyrics…',
+    enabled: (ctx) => ready(ctx) && ctx.selected.length === 1,
+    run: (ctx) => ui.openDialog('lyrics', { playlistId: ctx.playlist.id, trackId: ctx.selected[0] }),
+  },
   'track.showInFolder': {
     label: 'Show in File Manager',
     enabled: oneFound,
@@ -374,6 +396,17 @@ export const COMMANDS = {
     run: (ctx) => actions.clearCustomArt(ctx.nowPlaying.playlist.id, [ctx.nowPlaying.track.id]),
   },
 
+  'art.fetchLyrics': {
+    label: 'Fetch Lyrics',
+    enabled: (ctx) => idle(ctx) && Boolean(ctx.nowPlaying),
+    run: (ctx) => actions.fetchTrackLyrics(ctx.nowPlaying.playlist, ctx.nowPlaying.track.id),
+  },
+  'art.editLyrics': {
+    label: 'Edit Lyrics…',
+    enabled: (ctx) => idle(ctx) && Boolean(ctx.nowPlaying),
+    run: (ctx) => ui.openDialog('lyrics', { playlistId: ctx.nowPlaying.playlist.id, trackId: ctx.nowPlaying.track.id }),
+  },
+
   // --- Group header (right-click; acts on the group whose tracks are selected) ---
   'group.edit': {
     label: 'Edit Group…',
@@ -394,6 +427,11 @@ export const COMMANDS = {
 
   // --- Options ---
   'options.folderMappings': { label: 'Folder Mappings…', run: () => ui.openDialog('mappings') },
+  'options.fetchLyrics': {
+    label: 'Fetch Lyrics Automatically',
+    checked: (ctx) => ctx.fetchLyrics,
+    run: actions.toggleFetchLyrics,
+  },
   'options.restoreTabs': {
     label: 'Restore Tabs on Startup',
     checked: (ctx) => ctx.restoreTabs,
@@ -418,6 +456,8 @@ export const COMMANDS = {
 
   // --- Help ---
   'help.shortcuts': { label: 'Keyboard Shortcuts', run: () => ui.openDialog('shortcuts') },
+  'help.sharing': { label: 'Sharing Guide', run: () => ui.openDialog('sharing') },
+  'help.logs': { label: 'Open Log Folder', run: () => window.beachday.app.openLogs() },
   'help.about': { label: 'About Beachday', run: () => ui.openDialog('about') },
 };
 
@@ -457,6 +497,8 @@ export const TRACK_ITEMS = [
   'track.unlink',
   MOVE_TO_GROUP,
   '-',
+  'track.fetchLyrics',
+  'track.editLyrics',
   'track.showInFolder',
   'track.properties',
   '-',
@@ -481,10 +523,20 @@ export const GROUP_CONTEXT_ITEMS = [
   'edit.remove',
 ];
 
+/** View ▸ Art Pane ▸, also on the art pane's right-click menu. */
+const ART_MODES = {
+  label: 'Art Pane',
+  items: ['view.artMode.art', 'view.artMode.lyrics', 'view.artMode.over', '-', 'view.dimArt'],
+};
+
 /** Right-click on the art pane: art for the playing track, and the pane itself. */
 export const ART_CONTEXT_ITEMS = [
   'art.setNowPlaying',
   'art.clearNowPlaying',
+  'art.fetchLyrics',
+  'art.editLyrics',
+  '-',
+  ART_MODES,
   '-',
   'view.jumpToNowPlaying',
   'view.resetArtPane',
@@ -539,6 +591,7 @@ export const MENUS = [
   {
     label: 'View',
     items: [
+      ART_MODES,
       'view.showArtPane',
       'view.resetArtPane',
       '-',
@@ -594,9 +647,9 @@ export const MENUS = [
   { label: 'Track', items: TRACK_ITEMS },
   {
     label: 'Options',
-    items: ['options.folderMappings', 'options.restoreTabs', '-', 'options.showShapes', 'options.pauseGifs', 'options.pauseGifsWithPlayback'],
+    items: ['options.fetchLyrics', 'options.folderMappings', 'options.restoreTabs', '-', 'options.showShapes', 'options.pauseGifs', 'options.pauseGifsWithPlayback'],
   },
-  { label: 'Help', items: ['help.shortcuts', '-', 'help.about'] },
+  { label: 'Help', items: ['help.shortcuts', 'help.sharing', 'help.logs', '-', 'help.about'] },
 ];
 
 /** Run a command by id, as a menu click would (for buttons outside the menus). */

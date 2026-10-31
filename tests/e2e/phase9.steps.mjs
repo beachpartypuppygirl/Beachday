@@ -35,7 +35,7 @@ export default async ({ w, answers, log, S }) => {
   await R(`await actions.addFiles();`);
   await open();
   s = await R(`return { primary: hex('Primary').value, secondary: hex('Secondary').value, tertiary: hex('Tertiary').value, focused: document.activeElement === hex('Primary'), on: document.querySelector('.preset--on')?.textContent };`);
-  check('the dialog opens on the default colours, the first field focused, Beachday marked', s.primary === '#14110f' && s.secondary === '#e8766b' && s.tertiary === '#f0c040' && s.focused && s.on === 'Beachday', s);
+  check('the dialog opens on the default colours, the first field focused, Beachday marked', s.primary === '#14110f' && s.secondary === '#4fc9a9' && s.tertiary === '#f07fbf' && s.focused && s.on === 'Beachday', s);
 
   // --- Live preview, Cancel ---
   await R(`typeInto(hex('Primary'), '#102030'); await tick();`);
@@ -48,7 +48,7 @@ export default async ({ w, answers, log, S }) => {
   // --- Typing: partial, short, bad ---
   await open();
   s = await R(`typeInto(hex('Primary'), '#12'); await tick(); const bad = { bg: look().bg, marked: hex('Primary').classList.contains('colors__hex--bad'), apply: Boolean(button('Apply')) };
-    typeInto(hex('Primary'), '#f00'); await tick(); const short = { bg: theme.deriveTheme({ primary: '#ff0000', secondary: '#e8766b', tertiary: '#f0c040' }).tokens['--bg'], applied: look().bg, text: hex('Primary').value };
+    typeInto(hex('Primary'), '#f00'); await tick(); const short = { bg: theme.deriveTheme({ primary: '#ff0000', secondary: '#4fc9a9', tertiary: '#f07fbf' }).tokens['--bg'], applied: look().bg, text: hex('Primary').value };
     typeInto(hex('Primary'), '#12'); hex('Primary').dispatchEvent(new FocusEvent('focusout', { bubbles: true })); await tick();
     return { bad, short, restored: hex('Primary').value };`);
   check('a half-typed colour changes nothing and is marked', s.bad.bg === '#14110f' && s.bad.marked, s);
@@ -57,7 +57,7 @@ export default async ({ w, answers, log, S }) => {
 
   // --- The native picker ---
   s = await R(`typeInto(document.querySelector('[aria-label="Secondary colour"]'), '#00ff88'); await tick(); return { hex: hex('Secondary').value, accent: look().accent };`);
-  check('the native picker drives the same colour', s.hex === '#00ff88' && s.accent !== '#e8766b', s);
+  check('the native picker drives the same colour', s.hex === '#00ff88' && s.accent !== '#4fc9a9', s);
   await R(`ui.closeDialog(); await tick();`);
 
   // --- Apply, undo, redo ---

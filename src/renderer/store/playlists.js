@@ -26,6 +26,8 @@ import { DEFAULT_PALETTE, normalizePalette, samePalette } from './theme.js';
  */
 
 const HISTORY_LIMIT = 200;
+/** Far past any song's lyrics, and well short of bloating a .bday. */
+export const LYRICS_MAX_CHARS = 64 * 1024;
 
 let nextId = 1;
 const listeners = new Set();
@@ -122,6 +124,12 @@ export const isPristine = (playlist) =>
 export const missingCount = (playlist) =>
   playlist.doc.tracks.filter((track) => playlist.resolution[track.id]?.status !== 'ok').length;
 
+/** A track's own lyrics, if any. A .bday is untrusted input. */
+const customLyrics = (track) => {
+  const { lyrics } = track.overrides;
+  return typeof lyrics === 'string' && lyrics.trim() ? lyrics.slice(0, LYRICS_MAX_CHARS) : null;
+};
+
 /** What the UI and the engine show for a track: overrides win over tags. */
 export function trackView(track, resolution) {
   const resolved = resolution?.[track.id];
@@ -136,6 +144,15 @@ export function trackView(track, resolution) {
     album: track.tags.album,
     duration: track.tags.duration,
     gainDb: trackGainDb(track),
+    customLyrics: customLyrics(track),
+    // The file's own tags, not a playlist rename: it's the song being looked up.
+    lyricsQuery: {
+      fingerprint: track.fingerprint ?? null,
+      title: track.tags.title,
+      artist: track.tags.artist,
+      album: track.tags.album,
+      duration: track.tags.duration,
+    },
     // The engine works out chains from this (audio/sequence.js).
     linkNext: track.linkNext ?? null,
     path: track.absPath,
@@ -476,6 +493,19 @@ export function setTrackGain(id, ids, db) {
   }
   const value = Math.round(clampGain(db) * 100) / 100;
   editOverrides(id, ids, 'Adjust Gain', (overrides) => (overrides.gainDb === value ? overrides : { ...overrides, gainDb: value }));
+}
+
+/**
+ * Track ▸ Edit Lyrics: lyrics that belong to this playlist and travel in its
+ * .bday. Empty removes them, back to whatever's fetched. Fetched lyrics are
+ * never stored here (PLAN.md §18), so saving them unedited changes nothing.
+ */
+export function setTrackLyrics(id, trackId, text, { fetched = null } = {}) {
+  const lyrics = text.trim() ? text.trimEnd().slice(0, LYRICS_MAX_CHARS) : null;
+  editOverrides(id, [trackId], 'Edit Lyrics', (overrides) => {
+    if (!lyrics || (lyrics === fetched?.trimEnd() && !overrides.lyrics)) return without(overrides, 'lyrics');
+    return overrides.lyrics === lyrics ? overrides : { ...overrides, lyrics };
+  });
 }
 
 /** Track ▸ Reset All Overrides: name, art, gain and group pin, back to the file's own. */

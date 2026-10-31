@@ -2,7 +2,7 @@
 
 Audio player and playlist curation tool for local music files. Linux + Windows.
 
-**Status:** Phases 1–9 complete; Phase 10 next.
+**Status:** Phases 1–10 complete.
 **Last updated:** 2026-10-30
 
 ---
@@ -141,7 +141,7 @@ with ` (2)` on collisions); its fingerprint equals the loose file's.
   "formatVersion": 1,
   "bundled": false,
   "meta": { "name": "", "description": "", "author": "", "cover": "art/cover.png" },
-  "palette": { "primary": "#14110f", "secondary": "#e8766b", "tertiary": "#f0c040" },  // null: the default
+  "palette": { "primary": "#14110f", "secondary": "#4fc9a9", "tertiary": "#f07fbf" },  // null: the default
   "grouping": {
     "enabled": true,
     "groupKey": "%albumartist% / %album%",
@@ -395,7 +395,7 @@ should land while the codebase is small.
 | 7 | **Playlist-side metadata** — **DONE** | Per-track rename / dB (custom art landed in Phase 6); playlist name, description, author, cover; subgroup editor | Med |
 | 8 | **Shuffle + links** — **DONE** | Permutation-cursor shuffle; shuffle-remaining; contiguous chains with multi-select Link/Unlink; mid-chain click behaviour; repeat modes | Med |
 | 9 | **Theming** — **DONE** | Per-playlist palette picker; derived tokens; contrast validation | Med |
-| 10 | **Lyrics + packaging** | LRCLIB fetch with toggle; art-pane lyrics modes; Windows zip + Linux AppImage; install docs for friends | Med |
+| 10 | **Lyrics + packaging** — **DONE** | LRCLIB fetch with toggle; art-pane lyrics modes; Windows zip + Linux AppImage; install docs for friends | Med |
 
 ---
 
@@ -408,7 +408,7 @@ should land while the codebase is small.
 | Large GIF memory | Bloated files, stutter | Import-time dimension/frame check + downscale |
 | Per-track gain clipping | Audible distortion | Master-bus limiter; read ReplayGain tags as the default value |
 | Theming readability | Unusable UI | Derived tokens + WCAG contrast auto-adjust |
-| Lyrics source | Legal/ToS, IP bans | **LRCLIB only.** Genius's API deliberately omits lyrics; scraping Genius/AZLyrics violates ToS. LRCLIB is free, keyless, and returns synced `.lrc` timestamps. |
+| Lyrics source | Legal/ToS, IP bans | **LRCLIB only.** Genius's API deliberately omits lyrics; scraping Genius/AZLyrics violates ToS. LRCLIB is free, keyless, and returns synced `.lrc` timestamps. It's rate-limited (~45 requests/min per IP) and can answer 503 when busy; see §18. Lyrics are still copyrighted, so fetched ones never enter a `.bday`. |
 | `music-metadata` is ESM-only | Interop friction | **Project is ESM from the start.** No CommonJS. |
 | Windows SmartScreen | Friends can't install | See below — solved, no cost |
 
@@ -1046,3 +1046,85 @@ transparent images). `tests/e2e/phase9.steps.mjs` (23 checks): live preview, Esc
 and three-digit hex, the native picker, Enter, real Ctrl+Z / Ctrl+Y, a light preset, the
 "Shown as" note, Suggest from Art off and cycling on real embedded art, back to no palette,
 following the viewed tab with playback carrying on, save, close and reopen, a malformed palette.
+
+---
+
+## 18. Phase 10 — Complete (2026-10-30)
+
+Done-when met: LRCLIB fetch with a toggle, the art pane's lyrics modes, a Windows zip and a Linux
+AppImage, and install docs for friends (`INSTALL.md`, Help ▸ Sharing Guide).
+
+### What's built
+
+- **The LRCLIB client** (`src/main/lyrics.mjs`, Electron-free). One request at a time, 1.4s
+  apart, which holds us under ~45 a minute by construction. It names itself in `User-Agent`,
+  honours `Retry-After`, sits out a wait of 5s or less once, and past that sends nothing until
+  the wait is over. `/api/get` first, then `/api/search` for the closest match within 3s of the
+  track's length. Requires title and artist: from a title alone it would too often find
+  somebody else's song. Uses the file's tags, not a playlist rename.
+- **The cache** (`userData/lyrics-cache/<hash of the fingerprint>.json`). Found, instrumental and
+  nothing-found answers are remembered. Nothing-found is rechecked after 30 days. A failure
+  isn't remembered, so it's tried again the next time the track comes up.
+- **When it looks** (`store/lyrics.js`): the cache is read for the playing track and for the one
+  being prepared next (`player.state.upcoming`, set in the final 10s, as suggested by the user).
+  With **Options ▸ Fetch Lyrics Automatically** on, a miss goes to LRCLIB for those two tracks
+  only, after 1.5s, so skipping past a track never looks it up. Never a whole playlist. It's off
+  by default: fetching sends track names to a third party, so that's opt-in.
+- **Track ▸ Fetch Lyrics**: one track on request, automatic or not. Works on one selected
+  track, on purpose. Also on the art pane's right-click menu, for the playing track.
+- **View ▸ Art Pane ▸** Art Only / Lyrics Only / Lyrics Over Art / Dim Art Behind Lyrics. App-level,
+  in `config.json`, and on the art pane's right-click menu. Current line highlighted and kept
+  centred. Scrolling by hand holds the view for 4s. Plain lyrics are a block to scroll. Over art
+  the text is fixed white with a dark outline and shadow, whatever the theme.
+- **Track ▸ Edit Lyrics…**: paste or edit, plain or with `[mm:ss.xx]` timestamps
+  (`store/lrc.js`, pure). Stored as `overrides.lyrics`, undoable, and it travels in the `.bday`.
+  Reset All Overrides clears it. Capped at 64KB.
+- **Help ▸ Sharing Guide**, and **Help ▸ Open Log Folder** with a real log
+  (`userData/logs/beachday.log`, via `src/main/log.mjs`): startup, renderer crashes and errors,
+  uncaught main errors, lyrics failures. One old file is kept past 1MB.
+
+### Decisions made while building
+
+- **Fetched lyrics never enter a `.bday`** (the user's call). Passing on a playlist shouldn't
+  mean passing on copies of copyrighted text; each copy of Beachday fetches its own.
+- **Lyrics a person pastes or edits do travel** (the user's call). Edit Lyrics opens on the
+  fetched text so it can be corrected. Saving it unchanged stores nothing; **changing** it makes
+  it the playlist's own, and the dialog says so.
+- **Keyed by audio fingerprint, not track id**: track ids repeat across playlists, so one song
+  could have shown another's lyrics.
+- **`User-Agent` is `Beachday v<version>`**. LRCLIB also asks for a homepage or email, and the
+  project has no public page. Add one there if it gets one.
+- **No version bump**: packages are still 0.1.0.
+- **Not built:** double-clicking a `.bday` (needs an installer or a registration step, so
+  `INSTALL.md` says to use File ▸ Open). LRCLIB's `/publish` (contributing lyrics back).
+
+### Packaging
+
+`npm run pack:all` makes both from Linux. Windows zip 154MB, AppImage 126MB. The asar holds only
+`src/main`, `dist/renderer`, and 287 `node_modules` entries. The AppImage launched on this
+Ubuntu 24.04 machine with `kernel.apparmor_restrict_unprivileged_userns=1`, with no sandbox error
+(and `libfuse2t64` installed), and wrote its log.
+
+**First real LRCLIB success, later on 2026-10-30**: after 2+ hours of 503s to any client (the
+homepage still loaded), Beachday's client fetched AJJ's "Linda Ronstadt" (plain lyrics; `/get` also
+answers 200 without `album_name`, so a track with no album tag is fine). The service stayed
+patchy: a `/search` minutes later got 503. Synced lyrics from the real service are unconfirmed.
+
+**Earlier the same day**: seven spaced requests over about 7 minutes on
+2026-10-30, from `/api/get` and `/api/search`, all got `503 ServerOverloaded` with
+`Retry-After: 1`. So the client's handling of a busy service is proven live, but a real lyric has
+never come back. The fake server follows LRCLIB's documented response shape. Try one real track.
+
+**Run on real Windows (2026-10-30)**: the user ran the zip and it works well. §12's narrower
+Windows-only risks haven't been checked one by one.
+
+### Testing
+
+`tests/unit/lyrics.test.mjs`: LRC and plain parsing, query cleaning, search matching, the cache,
+nothing-found expiry, Retry-After honoured to the end, a short wait sat out once, offline, one
+request at a time and spaced out. `tests/e2e/phase10.steps.mjs` runs a fake LRCLIB on port 5198,
+and `run-e2e.mjs` points every suite at it (`BEACHDAY_LRCLIB_URL`), so **tests never touch the
+real service**. It checks that off means no requests, that only the playing and next tracks are
+asked for, skipping, the cache, 429 and recovery, all three modes, Edit Lyrics and undo, fetched
+lyrics absent from the saved file and pasted ones present, and a "friend" with an empty cache.
+

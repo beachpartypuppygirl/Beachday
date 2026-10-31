@@ -4,6 +4,7 @@ import TrackList from './components/TrackList.jsx';
 import Transport from './components/Transport.jsx';
 import Dialogs from './components/Dialogs.jsx';
 import ArtImage from './components/ArtImage.jsx';
+import Lyrics from './components/Lyrics.jsx';
 import ContextMenu from './components/ContextMenu.jsx';
 import { usePlayer } from './audio/usePlayer.js';
 import { handleShortcut, runCommand, ART_CONTEXT_ITEMS } from './menus/commands.js';
@@ -160,7 +161,7 @@ function Splitter({ workspace, fraction }) {
 function ArtPane() {
   const { current, status } = usePlayer();
   const { playlists, playingId } = useSyncExternalStore(store.subscribe, store.getState);
-  const { pauseGifsWithPlayback, showShapes } = useUi();
+  const { pauseGifsWithPlayback, showShapes, artPaneMode } = useUi();
 
   if (!current) {
     return (
@@ -170,8 +171,16 @@ function ArtPane() {
       </div>
     );
   }
+  if (artPaneMode === 'lyrics') return <Lyrics track={current} />;
   const block = <img className="art art--generated" src={symbolUrl(current.symbolSeed)} alt="" draggable={false} />;
   const url = showShapes ? null : (store.paneArtUrl(playlists[playingId], current.id) ?? current.artUrl);
   const paused = pauseGifsWithPlayback && status !== 'playing';
-  return url ? <ArtImage key={url} className="art" src={url} fallback={block} paused={paused} /> : block;
+  const art = url ? <ArtImage key={url} className="art" src={url} fallback={block} paused={paused} /> : block;
+  if (artPaneMode !== 'over') return art;
+  return (
+    <>
+      {art}
+      <Lyrics track={current} overArt />
+    </>
+  );
 }

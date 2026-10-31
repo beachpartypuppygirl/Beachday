@@ -12,6 +12,8 @@ import { ROOT, makeWorkDir, removeWorkDir } from './fixtures.mjs';
 
 const here = (file) => fileURLToPath(new URL(file, import.meta.url));
 const DEV_SERVER = 'http://localhost:5173';
+// Tests never talk to the real LRCLIB. Phase 10's suite runs a fake one here.
+const FAKE_LRCLIB = 'http://127.0.0.1:5198/api';
 // Chromium's GPU/VA-API complaints on Linux: noise, not failures.
 const NOISE = /vaapi|WebGL|gpu\/|zygote|network_service/;
 
@@ -25,7 +27,7 @@ async function ensureDevServer() {
 
 function runSuite(name, stepsFile, work) {
   return new Promise((resolve) => {
-    const env = { ...process.env, BEACHDAY_TEST_DIR: work, STEPS: pathToFileURL(here(stepsFile)).href };
+    const env = { ...process.env, BEACHDAY_LRCLIB_URL: FAKE_LRCLIB, BEACHDAY_TEST_DIR: work, STEPS: pathToFileURL(here(stepsFile)).href };
     delete env.ELECTRON_RUN_AS_NODE; // Set in VS Code's terminals; makes Electron plain Node.
     console.log(`\n# ${name}`);
     const child = spawn(electronPath, [here('e2e/harness.mjs')], { env });
@@ -82,6 +84,11 @@ const GROUPS = [
     // Phase 9: palettes, the Colors dialog, light themes, contrast, suggestions, the palette in the .bday.
     label: 'e2e9',
     suites: [['phase 9', 'e2e/phase9.steps.mjs']],
+  },
+  {
+    // Phase 10: lyrics (only the playing and next track, cached, never in the .bday), art pane modes, Edit Lyrics, help.
+    label: 'e2e10',
+    suites: [['phase 10', 'e2e/phase10.steps.mjs']],
   },
 ];
 

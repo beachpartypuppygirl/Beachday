@@ -1,10 +1,12 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, Menu, net } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerMediaScheme, handleMediaProtocol } from './media.mjs';
 import { AUDIO_EXTENSIONS, collectAudioFiles, importTracks } from './metadata.mjs';
 import { registerPlaylistIpc } from './playlists.mjs';
 import { loadConfig, getConfig, updateConfig } from './config.mjs';
+import { createLyrics } from './lyrics.mjs';
+import { log, startLog } from './log.mjs';
 
 // ESM has no __dirname; derive it from import.meta.url.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -33,6 +35,8 @@ function createWindow() {
     frame: false,
     // Matches --bg so there is no white flash before React paints.
     backgroundColor: '#14110f',
+    // Windows takes this from the .exe; Linux needs telling.
+    icon: path.join(__dirname, '../../build/icon.png'),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
@@ -45,6 +49,10 @@ function createWindow() {
   });
 
   mainWindow.once('ready-to-show', () => mainWindow?.show());
+  mainWindow.webContents.on('render-process-gone', (_event, details) => log(`renderer gone: ${details.reason}`));
+  mainWindow.webContents.on('console-message', ({ level, message }) => {
+    if (level === 'error') log(`renderer: ${message}`);
+  });
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
@@ -175,15 +183,16 @@ ipcMain.handle('tracks:import-dropped', (event, paths) => {
 
 // View preferences: app-level, never stored in a playlist.
 ipcMain.handle('prefs:get', () => {
-  const { artPane, pauseGifs, pauseGifsWithPlayback, showShapes } = getConfig();
-  return { artPane, pauseGifs, pauseGifsWithPlayback, showShapes };
+  const { artPane, pauseGifs, pauseGifsWithPlayback, showShapes, artPaneMode, dimLyricsArt, fetchLyrics } = getConfig();
+  return { artPane, pauseGifs, pauseGifsWithPlayback, showShapes, artPaneMode, dimLyricsArt, fetchLyrics };
 });
 
 ipcMain.handle('prefs:set', (_event, patch) => {
   const clean = {};
-  for (const key of ['pauseGifs', 'pauseGifsWithPlayback', 'showShapes']) {
+  for (const key of ['pauseGifs', 'pauseGifsWithPlayback', 'showShapes', 'dimLyricsArt', 'fetchLyrics']) {
     if (typeof patch?.[key] === 'boolean') clean[key] = patch[key];
   }
+  if (['art', 'lyrics', 'over'].includes(patch?.artPaneMode)) clean.artPaneMode = patch.artPaneMode;
   if (patch?.artPane) {
     const { visible, fraction } = { ...getConfig().artPane, ...patch.artPane };
     clean.artPane = {
@@ -193,6 +202,14 @@ ipcMain.handle('prefs:set', (_event, patch) => {
   }
   return updateConfig(clean);
 });
+
+// Lyrics live in main with every other network and disk concern; see lyrics.mjs.
+let lyrics = null;
+ipcMain.handle('lyrics:cached', (_event, query) => lyrics.cached(query));
+ipcMain.handle('lyrics:fetch', (_event, query) => lyrics.fetch(query));
+
+const logsDir = () => path.join(app.getPath('userData'), 'logs');
+ipcMain.handle('app:open-logs', () => shell.openPath(logsDir()));
 
 ipcMain.handle('app:confirm-close', () => {
   closeConfirmed = true;
@@ -206,6 +223,9 @@ registerPlaylistIpc();
 // ---------------------------------------------------------------------------
 
 registerMediaScheme();
+
+// Watches, and leaves Electron's own handling of the crash as it was.
+process.on('uncaughtExceptionMonitor', (error) => log(`uncaught: ${error.stack ?? error}`));
 
 // Only one Beachday at a time; a second launch focuses the existing window.
 if (!app.requestSingleInstanceLock()) {
@@ -222,7 +242,17 @@ if (!app.requestSingleInstanceLock()) {
     // No native menu: Beachday draws its own (MENUS.md). Electron's default
     // menu would also claim Ctrl+W and Ctrl+Q, which ours use.
     Menu.setApplicationMenu(null);
+    await startLog(logsDir());
+    log(`Beachday ${app.getVersion()} on ${process.platform}/${process.arch}`);
     await loadConfig(app.getPath('userData'));
+    lyrics = createLyrics({
+      cacheDir: path.join(app.getPath('userData'), 'lyrics-cache'),
+      // net.fetch, unlike Node's, follows the system's proxy settings.
+      fetch: (url, options) => net.fetch(url, options),
+      api: process.env.BEACHDAY_LRCLIB_URL,
+      userAgent: `Beachday v${app.getVersion()}`,
+      log,
+    });
     handleMediaProtocol();
     createWindow();
   });

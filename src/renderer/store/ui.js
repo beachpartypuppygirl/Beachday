@@ -13,7 +13,7 @@ const listeners = new Set();
 let state = {
   /**
    * null | 'relink' | 'mappings' | 'shortcuts' | 'about' | 'properties' |
-   * 'playlistProperties' | 'colors' | 'gain' | 'grouping' | 'groups'
+   * 'playlistProperties' | 'colors' | 'gain' | 'lyrics' | 'grouping' | 'groups' | 'sharing'
    */
   dialog: null,
   /** What the open dialog is about, e.g. { key } for 'groups', { ids } for 'gain' */
@@ -43,6 +43,12 @@ let state = {
    * the OS overlay show each track's generated symbol, whatever art it has (mirrors app config)
    */
   showShapes: false,
+  /** View ▸ Art Pane: 'art' | 'lyrics' | 'over' (mirrors app config) */
+  artPaneMode: 'art',
+  /** View ▸ Art Pane ▸ Dim Art Behind Lyrics (mirrors app config) */
+  dimLyricsArt: true,
+  /** Options ▸ Fetch Lyrics Automatically (mirrors app config) */
+  fetchLyrics: false,
 };
 
 const NOTICE_MS = 5000;
@@ -74,8 +80,9 @@ export function notify(notice) {
 export const setRestoreTabs = (restoreTabs) => set({ restoreTabs });
 
 export async function loadPrefs() {
-  const { artPane, pauseGifs, pauseGifsWithPlayback, showShapes } = await window.beachday.prefs.get();
-  set({ artPane, pauseGifs, pauseGifsWithPlayback, showShapes });
+  const prefs = await window.beachday.prefs.get();
+  const { artPane, pauseGifs, pauseGifsWithPlayback, showShapes, artPaneMode, dimLyricsArt, fetchLyrics } = prefs;
+  set({ artPane, pauseGifs, pauseGifsWithPlayback, showShapes, artPaneMode, dimLyricsArt, fetchLyrics });
   player.setShowShapes(showShapes);
 }
 
@@ -103,6 +110,16 @@ export function setShowShapes(showShapes) {
   player.setShowShapes(showShapes);
   window.beachday.prefs.set({ showShapes });
 }
+
+/** App-level, like the other view preferences: one way of looking at every playlist. */
+function setPref(patch) {
+  set(patch);
+  window.beachday.prefs.set(patch);
+}
+
+export const setArtPaneMode = (artPaneMode) => setPref({ artPaneMode });
+export const setDimLyricsArt = (dimLyricsArt) => setPref({ dimLyricsArt });
+export const setFetchLyrics = (fetchLyrics) => setPref({ fetchLyrics });
 
 let scrollNonce = 0;
 export const requestScroll = (playlistId, trackId) =>

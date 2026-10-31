@@ -27,14 +27,14 @@
   --text-muted: #7d726b;
 
   /* --- Derived accents --- */
-  --accent: #e8766b;
-  --accent-hover: #eb8a81;
+  --accent: #4fc9a9;
+  --accent-hover: #63cfb3;
   --accent-contrast: #14110f;
-  --highlight: #f0c040;
+  --highlight: #f07fbf;
 
   /* --- Selected rows --- */
-  --selected: #4e2f2a;
-  --selected-soft: #3d2724;
+  --selected: #294239;
+  --selected-soft: #25342e;
 
   /* --- Lines --- */
   --border: #342c27;

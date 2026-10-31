@@ -27,6 +27,12 @@ const DEFAULTS = {
   pauseGifsWithPlayback: true,
   /** Options ▸ Show Track Shapes Instead of Art: every track's generated symbol, art or not */
   showShapes: false,
+  /** View ▸ Art Pane: 'art' | 'lyrics' | 'over' */
+  artPaneMode: 'art',
+  /** View ▸ Art Pane ▸ Dim Art Behind Lyrics */
+  dimLyricsArt: true,
+  /** Options ▸ Fetch Lyrics Automatically: off until asked, since it sends track names to LRCLIB */
+  fetchLyrics: false,
 };
 
 let configPath = null;

@@ -9,6 +9,7 @@ files:
   - src/main/**/*
   - dist/renderer/**/*
   - package.json
+  - build/icon.png
 
 # Windows ships as a ZIP rather than an installer, on purpose.
 # See PLAN.md §7 "Distribution without a code-signing certificate":

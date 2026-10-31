@@ -9,6 +9,7 @@ import { artRefUrl } from '../store/art.js';
 import { GAIN_MAX_DB, GAIN_MIN_DB, clampGain, formatGain, seedGainDb, trackGainDb } from '../store/gain.js';
 import { PRESETS, SUB_LINES, TOKENS, applyGroupEdits, buildLayout } from '../store/grouping.js';
 import { DEFAULT_PALETTE, PALETTE_PRESETS, deriveTheme, normalizePalette, parseHex, samePalette } from '../store/theme.js';
+import { fetchedLyrics, lyricsText } from '../store/lyrics.js';
 import ArtImage from './ArtImage.jsx';
 import { GroupHeader } from './TrackList.jsx';
 
@@ -25,6 +26,8 @@ export default function Dialogs() {
   if (dialog === 'playlistProperties') return <PlaylistPropertiesDialog />;
   if (dialog === 'colors') return <ColorsDialog />;
   if (dialog === 'gain') return <GainDialog />;
+  if (dialog === 'lyrics') return <LyricsDialog />;
+  if (dialog === 'sharing') return <SharingDialog />;
   if (dialog === 'grouping') return <GroupingDialog />;
   if (dialog === 'groups') return <GroupsDialog />;
   return null;
@@ -257,6 +260,7 @@ function PropertiesDialog() {
     ['Name', track.overrides.title],
     ['Gain', `${formatGain(gain)} (${gainSource})`],
     ['Custom art', track.overrides.art ? 'Yes' : null],
+    ['Lyrics', store.trackView(track, playlist.resolution).customLyrics ? 'Saved in this playlist' : null],
     ['Group', group?.key === track.groupId ? `${group.mainName} (moved here)` : null],
   ].filter(([, value]) => value);
 
@@ -592,6 +596,63 @@ function GainDialog() {
   );
 }
 
+// --- Lyrics (Track ▸ Edit Lyrics…) -------------------------------------------
+
+function LyricsDialog() {
+  const { dialogArgs } = ui.useUi();
+  const state = useSyncExternalStore(store.subscribe, store.getState);
+  const playlist = state.playlists[dialogArgs.playlistId];
+  const track = playlist?.doc.tracks.find((t) => t.id === dialogArgs.trackId);
+  const view = track && store.trackView(track, playlist.resolution);
+  const [text, setText] = useState(() => (view ? lyricsText(view) : ''));
+  if (!view) return null;
+
+  const entry = fetchedLyrics(view);
+  const fetched = entry?.synced ?? entry?.plain ?? null;
+  const save = (value) => {
+    store.setTrackLyrics(playlist.id, track.id, value, { fetched });
+    ui.closeDialog();
+  };
+
+  return (
+    <Modal
+      title={`Lyrics: ${view.title}`}
+      wide
+      footer={
+        <>
+          {view.customLyrics && (
+            <button className="button button--quiet" type="button" onClick={() => save('')}>
+              Remove from Playlist
+            </button>
+          )}
+          <span className="modal__spacer" />
+          <button className="button button--quiet" type="button" onClick={ui.closeDialog}>
+            Cancel
+          </button>
+          <button className="button" type="button" onClick={() => save(text)}>
+            Save
+          </button>
+        </>
+      }
+    >
+      <textarea
+        className="field form__textarea lyricsedit"
+        data-autofocus
+        rows={16}
+        value={text}
+        spellCheck={false}
+        maxLength={store.LYRICS_MAX_CHARS}
+        aria-label="Lyrics"
+        onChange={(e) => setText(e.target.value)}
+      />
+      <p className="modal__text modal__text--muted form__note">
+        Paste plain lyrics, or synced ones with timestamps like [01:23.45] to follow along. Saved inside
+        this playlist, so they travel with it. Lyrics Beachday fetches stay on this computer unless you change them here.
+      </p>
+    </Modal>
+  );
+}
+
 // --- Grouping template (Playlist ▸ Grouping ▸ Custom…) -----------------------
 
 /** A token list that inserts into whichever template field was focused last. */
@@ -883,6 +944,39 @@ function ShortcutsDialog() {
           </div>
         ))}
       </dl>
+    </Modal>
+  );
+}
+
+function SharingDialog() {
+  return (
+    <Modal title="Sharing guide" wide footer={<button className="button" type="button" onClick={ui.closeDialog}>Close</button>}>
+      <h3 className="modal__section">Sharing a playlist</h3>
+      <p className="modal__text">
+        Use File ▸ Export Bundled Copy… to make one .bday with the music inside, then send that file. Your names,
+        art, colours, gain, groups and links all go with it. A playlist saved without its music only works for
+        someone who has the same tracks; Beachday will help them find their copies.
+      </p>
+      <p className="modal__text">
+        Lyrics fetched from the internet aren’t included; their copy of Beachday can fetch its own. Lyrics you’ve
+        pasted or edited are part of the playlist, and do go with it.
+      </p>
+      <h3 className="modal__section">Sharing Beachday on Windows</h3>
+      <ol className="modal__text guide">
+        <li>Send them the Beachday zip file.</li>
+        <li>They right-click the zip, choose <strong>Properties</strong>, tick <strong>Unblock</strong>, and click OK.</li>
+        <li>They extract it wherever they like, and run <strong>Beachday.exe</strong> from the folder.</li>
+      </ol>
+      <p className="modal__text">
+        If they skip the Unblock step, Windows says “Windows protected your PC”. That’s normal for software made by
+        one person: <strong>More info</strong>, then <strong>Run anyway</strong>.
+      </p>
+      <h3 className="modal__section">Sharing Beachday on Linux</h3>
+      <ol className="modal__text guide">
+        <li>Send them the Beachday .AppImage file.</li>
+        <li>They allow it to run: Properties ▸ Permissions, or <code>chmod +x</code> on it.</li>
+        <li>They double-click it.</li>
+      </ol>
     </Modal>
   );
 }
