@@ -134,8 +134,8 @@ button {
 .menu--nested {
   top: -5px;
   left: calc(100% + 2px);
-  /* Move to Group can list dozens of groups. */
-  max-height: 60vh;
+  /* Move to Group can list dozens of groups. MenuList keeps it in the window. */
+  max-height: calc(100vh - 16px);
   overflow-y: auto;
 }
 

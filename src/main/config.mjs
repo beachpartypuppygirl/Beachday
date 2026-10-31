@@ -33,6 +33,8 @@ const DEFAULTS = {
   dimLyricsArt: true,
   /** Options ▸ Fetch Lyrics Automatically: off until asked, since it sends track names to LRCLIB */
   fetchLyrics: false,
+  /** View ▸ Now Playing Label: 'artist' | 'album' | 'both' */
+  nowPlayingLabel: 'album',
 };
 
 let configPath = null;

@@ -90,6 +90,11 @@ const GROUPS = [
     label: 'e2e10',
     suites: [['phase 10', 'e2e/phase10.steps.mjs']],
   },
+  {
+    // Curation: Move to Group near the window's edges, Edit Tags, Swap Artist and Album, the now playing label, selecting a group's tracks.
+    label: 'curation',
+    suites: [['curation', 'e2e/curation.steps.mjs']],
+  },
 ];
 
 // E2E_ONLY=6 runs only the groups with a suite whose name contains "6".

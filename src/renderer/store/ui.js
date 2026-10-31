@@ -13,7 +13,7 @@ const listeners = new Set();
 let state = {
   /**
    * null | 'relink' | 'mappings' | 'shortcuts' | 'about' | 'properties' |
-   * 'playlistProperties' | 'colors' | 'gain' | 'lyrics' | 'grouping' | 'groups' | 'sharing'
+   * 'playlistProperties' | 'colors' | 'gain' | 'tags' | 'lyrics' | 'grouping' | 'groups' | 'sharing'
    */
   dialog: null,
   /** What the open dialog is about, e.g. { key } for 'groups', { ids } for 'gain' */
@@ -49,6 +49,8 @@ let state = {
   dimLyricsArt: true,
   /** Options ▸ Fetch Lyrics Automatically (mirrors app config) */
   fetchLyrics: false,
+  /** View ▸ Now Playing Label: 'artist' | 'album' | 'both' (mirrors app config) */
+  nowPlayingLabel: 'album',
 };
 
 const NOTICE_MS = 5000;
@@ -81,8 +83,8 @@ export const setRestoreTabs = (restoreTabs) => set({ restoreTabs });
 
 export async function loadPrefs() {
   const prefs = await window.beachday.prefs.get();
-  const { artPane, pauseGifs, pauseGifsWithPlayback, showShapes, artPaneMode, dimLyricsArt, fetchLyrics } = prefs;
-  set({ artPane, pauseGifs, pauseGifsWithPlayback, showShapes, artPaneMode, dimLyricsArt, fetchLyrics });
+  const { artPane, pauseGifs, pauseGifsWithPlayback, showShapes, artPaneMode, dimLyricsArt, fetchLyrics, nowPlayingLabel } = prefs;
+  set({ artPane, pauseGifs, pauseGifsWithPlayback, showShapes, artPaneMode, dimLyricsArt, fetchLyrics, nowPlayingLabel });
   player.setShowShapes(showShapes);
 }
 
@@ -120,6 +122,7 @@ function setPref(patch) {
 export const setArtPaneMode = (artPaneMode) => setPref({ artPaneMode });
 export const setDimLyricsArt = (dimLyricsArt) => setPref({ dimLyricsArt });
 export const setFetchLyrics = (fetchLyrics) => setPref({ fetchLyrics });
+export const setNowPlayingLabel = (nowPlayingLabel) => setPref({ nowPlayingLabel });
 
 let scrollNonce = 0;
 export const requestScroll = (playlistId, trackId) =>

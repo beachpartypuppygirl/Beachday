@@ -219,8 +219,10 @@ class Player {
     });
     if (index < 0) return;
     const now = queue[index];
-    // Renamed, or custom art set (or cleared), while playing: refresh the OS overlay.
-    if (now.artUrl !== current.artUrl || now.title !== current.title) this.#updateMediaSession(now);
+    // Renamed, retagged, or custom art set (or cleared), while playing: refresh the OS overlay.
+    if (now.artUrl !== current.artUrl || now.title !== current.title || now.artist !== current.artist || now.album !== current.album) {
+      this.#updateMediaSession(now);
+    }
     // Gain adjusted while playing (or preloaded): it applies straight away.
     if (this.#active?.holds(now) && this.#active.gainDb !== (now.gainDb ?? 0) && this.#previewing?.id !== now.id) {
       this.#active.setGain(now.gainDb ?? 0);

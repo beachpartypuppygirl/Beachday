@@ -1128,3 +1128,51 @@ real service**. It checks that off means no requests, that only the playing and 
 asked for, skipping, the cache, 429 and recovery, all three modes, Edit Lyrics and undo, fetched
 lyrics absent from the saved file and pasted ones present, and a "friend" with an empty cache.
 
+---
+
+## 19. Curation round — Complete (2026-10-31)
+
+Four things the user bumped into using the first release on a real, growing playlist.
+
+- **Move to Group near the window's edges.** The submenu opened level with its parent row and
+  capped itself at 60vh, so from a row low on screen its end sat below the window: scrolling hit
+  the cap with New Group… still out of sight. `MenuList` now places every submenu after measuring
+  it: up to stay in the window, to the left when there's no room on the right, scrolling only if
+  it's taller than the window. New Group… and By Tags come first, so they're in reach however many
+  groups follow. That let the 40-group cap (a disabled "N more…", leaving those groups unreachable)
+  go. Considered and dropped: a second nested menu for the groups, which adds a hover to the common
+  case of filing into an existing group.
+- **Edit Tags (Track menu and group header).** `overrides.artist`, `.album` and `.albumArtist`, in
+  the .bday like every override; the file is never written. `store/tags.js` is the one reader:
+  `trackTag()` feeds the list, transport, OS overlay, grouping tokens and the lyrics lookup. With
+  several tracks, a field they disagree on starts blank and only fields actually changed apply.
+  Clearing a field, or Reset to File Tags, returns to the file. A value equal to the file's stores
+  no override.
+- **Swap Artist and Album.** Added because a batch edit can't fix what the user described: tags
+  flipped for a foobar2000 skin need each track's own two values exchanged, not one value set on
+  all. Swapping an empty tag leaves a blank override, so it can be swapped back exactly.
+- **An album artist that repeats the artist follows it,** in edits and swaps alike. Otherwise a file
+  tagged with both would keep grouping under the old name. A different album artist (Various
+  Artists) is left alone.
+- **Edited tags go to LRCLIB.** A rename is a playlist's name for a track, but edited tags say whose
+  song it is, so for flipped files they're the difference between finding lyrics and not. Results are
+  cached by fingerprint, so a "none" from before an edit needs Track ▸ Fetch Lyrics to look again.
+- **Now Playing Label** (View menu, or right-click the label): Artist, Album, or both, an app-level
+  preference. Default Album, as before; a track missing the chosen tag shows the other.
+- **Select All Tracks in Group.** Selecting a group has always meant selecting its tracks; there's
+  no separate group selection. The command's difference is that the header stays unlit, and a
+  collapsed group opens. `view.tracksOnly` holds the very Set selected, so any other selection ends
+  it without having to reset anything. Ctrl+click on a header adds its tracks to a selection.
+
+**Known limit:** Edit Groups changes to a tag-derived group (art, description, header lines) are
+keyed by its tags, so retagging its tracks gives them a new group without those changes. Undo
+brings them back, and custom groups aren't affected. Carrying them across is possible if it
+bothers anyone.
+
+### Testing
+
+`tests/unit/tags.test.mjs`: overrides, a hostile .bday, swapping and swapping back, empty tags, the
+album artist rule, grouping. `tests/e2e/curation.steps.mjs` (26 checks): real right-clicks at the
+bottom and right edges of a 70-group playlist, Edit Tags on one and several tracks, live on the
+playing track, undo, the .bday, the music file's bytes unchanged, the label in both places, and
+selecting a group's tracks, collapsed too.

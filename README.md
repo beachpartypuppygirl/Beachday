@@ -15,8 +15,8 @@ looking just the way you made it.
 
 - **Portable playlists:** save a `.bday` with the music inside it, or without. If someone opens one
   without its music, Beachday helps them find their own copies.
-- **Curate without touching your files:** rename tracks, set custom art, adjust volume per track, and
-  arrange tracks into groups. It all lives in the playlist, so your music's tags are never changed.
+- **Curate without touching your files:** rename and retag tracks, one at a time or in batches, set
+  custom art, adjust volume per track, and arrange tracks into groups. It all lives in the playlist, so your music's tags are never changed.
 - **A colour theme for every playlist:** pick three colours, start from a preset, or get suggestions
   from the cover art. Beachday keeps the text readable whatever you choose.
 - **Big art:** a resizable art pane with animated GIF support, and a generated symbol for any track
@@ -55,7 +55,7 @@ Having trouble, or want to update or remove Beachday? See [INSTALL.md](INSTALL.m
 ## Sharing a playlist
 
 Use **File ▸ Export Bundled Copy…** to make one `.bday` with the music inside, then send that file.
-Your names, art, colours, gain, groups and links all go with it.
+Your names, tags, art, colours, gain, groups and links all go with it.
 
 A playlist saved without its music only works for someone who has the same tracks. Beachday will
 help them find their copies.

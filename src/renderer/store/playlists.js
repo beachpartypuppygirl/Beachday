@@ -2,6 +2,7 @@ import { player } from '../audio/engine.js';
 import { applyGroupEdits, buildLayout, moveTracks, moveGroup, newCustomKey, pinTracks, PRESETS, withChains } from './grouping.js';
 import { artRefUrl, symbolSeed, trackArtUrl } from './art.js';
 import { clampGain, trackGainDb } from './gain.js';
+import { trackTag, withSwappedTags, withTags } from './tags.js';
 import { DEFAULT_PALETTE, normalizePalette, samePalette } from './theme.js';
 
 /**
@@ -58,6 +59,8 @@ const emptyView = (collapsed = new Set()) => ({
   anchorId: null,
   /** Keyboard focus row. */
   focusId: null,
+  /** The selection, while it's a group's tracks picked without the group (see selectGroupTracks). */
+  tracksOnly: null,
 });
 
 /** Collapsed group keys as stored in a document's `groups`. */
@@ -140,17 +143,18 @@ export function trackView(track, resolution) {
     artUrl: trackArtUrl(track, resolved),
     symbolSeed: symbolSeed(track),
     title: track.overrides.title || track.tags.title,
-    artist: track.tags.artist,
-    album: track.tags.album,
+    artist: trackTag(track, 'artist'),
+    album: trackTag(track, 'album'),
     duration: track.tags.duration,
     gainDb: trackGainDb(track),
     customLyrics: customLyrics(track),
-    // The file's own tags, not a playlist rename: it's the song being looked up.
+    // The file's own title, not a playlist rename: it's the song being looked
+    // up. Edited tags do count, since they're there to say whose song it is.
     lyricsQuery: {
       fingerprint: track.fingerprint ?? null,
       title: track.tags.title,
-      artist: track.tags.artist,
-      album: track.tags.album,
+      artist: trackTag(track, 'artist'),
+      album: trackTag(track, 'album'),
       duration: track.tags.duration,
     },
     // The engine works out chains from this (audio/sequence.js).
@@ -485,6 +489,16 @@ export function renameTrack(id, trackId, title) {
   });
 }
 
+/** Track ▸ Edit Tags: `patch` sets artist, album or albumArtist on `ids` (null: back to the file's own). */
+export function setTrackTags(id, ids, patch) {
+  editOverrides(id, ids, 'Edit Tags', (_, track) => withTags(track, patch));
+}
+
+/** Track ▸ Swap Artist and Album: for files tagged the wrong way round. */
+export function swapArtistAlbum(id, ids) {
+  editOverrides(id, ids, 'Swap Artist and Album', (_, track) => withSwappedTags(track));
+}
+
 /** Track ▸ Adjust Gain: set `ids` to `db` (clamped to the cap), or null to reset to ReplayGain. */
 export function setTrackGain(id, ids, db) {
   if (db == null) {
@@ -508,7 +522,7 @@ export function setTrackLyrics(id, trackId, text, { fetched = null } = {}) {
   });
 }
 
-/** Track ▸ Reset All Overrides: name, art, gain and group pin, back to the file's own. */
+/** Track ▸ Reset All Overrides: name, tags, art, gain and group pin, back to the file's own. */
 export function resetOverrides(id, ids) {
   const targets = new Set(ids);
   edit(id, 'Reset All Overrides', (doc) => {
@@ -633,6 +647,20 @@ export function setSelection(id, ids, { anchorId, focusId } = {}) {
 export function selectAll(id) {
   const playlist = state.playlists[id];
   if (playlist) setSelection(id, layoutOf(playlist).order);
+}
+
+/**
+ * Group header ▸ Select All Tracks in Group: its tracks, not the group, so the
+ * header stays unlit. `tracksOnly` holds this very Set, so any other selection
+ * ends the state by not being it. A collapsed group opens to show them.
+ */
+export function selectGroupTracks(id, key) {
+  const playlist = state.playlists[id];
+  const group = playlist && layoutOf(playlist).groups?.find((g) => g.key === key);
+  if (!group) return;
+  if (group.collapsed) toggleCollapsed(id, key);
+  const selection = new Set(group.trackIds);
+  updateView(id, { selection, tracksOnly: selection, anchorId: group.trackIds[0], focusId: group.trackIds.at(-1) });
 }
 
 export function toggleCollapsed(id, key) {

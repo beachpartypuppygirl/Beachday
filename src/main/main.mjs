@@ -183,8 +183,8 @@ ipcMain.handle('tracks:import-dropped', (event, paths) => {
 
 // View preferences: app-level, never stored in a playlist.
 ipcMain.handle('prefs:get', () => {
-  const { artPane, pauseGifs, pauseGifsWithPlayback, showShapes, artPaneMode, dimLyricsArt, fetchLyrics } = getConfig();
-  return { artPane, pauseGifs, pauseGifsWithPlayback, showShapes, artPaneMode, dimLyricsArt, fetchLyrics };
+  const { artPane, pauseGifs, pauseGifsWithPlayback, showShapes, artPaneMode, dimLyricsArt, fetchLyrics, nowPlayingLabel } = getConfig();
+  return { artPane, pauseGifs, pauseGifsWithPlayback, showShapes, artPaneMode, dimLyricsArt, fetchLyrics, nowPlayingLabel };
 });
 
 ipcMain.handle('prefs:set', (_event, patch) => {
@@ -193,6 +193,7 @@ ipcMain.handle('prefs:set', (_event, patch) => {
     if (typeof patch?.[key] === 'boolean') clean[key] = patch[key];
   }
   if (['art', 'lyrics', 'over'].includes(patch?.artPaneMode)) clean.artPaneMode = patch.artPaneMode;
+  if (['artist', 'album', 'both'].includes(patch?.nowPlayingLabel)) clean.nowPlayingLabel = patch.nowPlayingLabel;
   if (patch?.artPane) {
     const { visible, fraction } = { ...getConfig().artPane, ...patch.artPane };
     clean.artPane = {

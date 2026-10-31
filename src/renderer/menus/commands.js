@@ -46,6 +46,7 @@ export function getContext() {
     artPaneMode: ui.getState().artPaneMode,
     dimLyricsArt: ui.getState().dimLyricsArt,
     fetchLyrics: ui.getState().fetchLyrics,
+    nowPlayingLabel: ui.getState().nowPlayingLabel,
     nowPlaying: playingTrack ? { playlist: playlists[playingId], track: playingTrack } : null,
     busy: Boolean(ui.getState().busy),
   };
@@ -173,6 +174,9 @@ export const COMMANDS = {
     enabled: (ctx) => ctx.artPaneMode === 'over',
     run: (ctx) => ui.setDimLyricsArt(!ctx.dimLyricsArt),
   },
+  'view.nowPlaying.artist': { label: 'Artist', checked: (ctx) => ctx.nowPlayingLabel === 'artist', run: () => ui.setNowPlayingLabel('artist') },
+  'view.nowPlaying.album': { label: 'Album', checked: (ctx) => ctx.nowPlayingLabel === 'album', run: () => ui.setNowPlayingLabel('album') },
+  'view.nowPlaying.both': { label: 'Artist and Album', checked: (ctx) => ctx.nowPlayingLabel === 'both', run: () => ui.setNowPlayingLabel('both') },
   'view.collapseAll': {
     label: 'Collapse All Groups',
     enabled: grouped,
@@ -311,6 +315,16 @@ export const COMMANDS = {
       ui.requestRename(ctx.playlist.id, ctx.selected[0]);
     },
   },
+  'track.editTags': {
+    label: (ctx) => (ctx.selected.length > 1 ? `Edit Tags for ${ctx.selected.length} Tracks…` : 'Edit Tags…'),
+    enabled: hasSelection,
+    run: (ctx) => ui.openDialog('tags', { playlistId: ctx.playlist.id, ids: ctx.selected }),
+  },
+  'track.swapTags': {
+    label: 'Swap Artist and Album',
+    enabled: hasSelection,
+    run: (ctx) => store.swapArtistAlbum(ctx.playlist.id, ctx.selected),
+  },
   'track.gain': {
     label: (ctx) => (ctx.selected.length > 1 ? `Adjust Gain for ${ctx.selected.length} Tracks…` : 'Adjust Gain…'),
     enabled: hasSelection,
@@ -408,6 +422,11 @@ export const COMMANDS = {
   },
 
   // --- Group header (right-click; acts on the group whose tracks are selected) ---
+  'group.selectTracks': {
+    label: 'Select All Tracks in Group',
+    enabled: (ctx) => ready(ctx) && Boolean(ctx.selectedGroup),
+    run: (ctx) => store.selectGroupTracks(ctx.playlist.id, ctx.selectedGroup.key),
+  },
   'group.edit': {
     label: 'Edit Group…',
     enabled: (ctx) => ready(ctx) && Boolean(ctx.selectedGroup),
@@ -463,31 +482,31 @@ export const COMMANDS = {
 
 const fileName = (filePath) => filePath.split(/[\\/]/).pop();
 
-// How many groups Move to Group lists before pointing at Edit Groups instead.
-const MOVE_TO_GROUP_LIMIT = 40;
-
-/** Track ▸ Move to Group ▸: every group in display order, then New Group… and unpinning. */
+/**
+ * Track ▸ Move to Group ▸: New Group… and unpinning first, so they're always
+ * in reach however many groups follow, then every group in display order.
+ */
 const MOVE_TO_GROUP = {
   label: 'Move to Group',
   items: (ctx) => {
     if (!hasSelection(ctx)) return [];
     // Grouping off: there are no groups yet, but a new one can be made.
     if (!grouped(ctx)) return ['track.newGroup'];
-    const { groups } = store.layoutOf(ctx.playlist);
-    const listed = groups.slice(0, MOVE_TO_GROUP_LIMIT).map((group) => ({
+    const listed = store.layoutOf(ctx.playlist).groups.map((group) => ({
       label: `${group.mainName}${group.custom ? '' : group.subNames[0] ? ` — ${group.subNames[0]}` : ''}`,
       checked: () => ctx.selectedGroup === group,
       enabled: (inner) => !inner.busy,
       run: () => store.moveToGroup(ctx.playlist.id, ctx.selected, group.key),
     }));
-    const more = groups.length > MOVE_TO_GROUP_LIMIT ? [{ label: `${groups.length - MOVE_TO_GROUP_LIMIT} more…`, enabled: () => false }] : [];
-    return [...listed, ...more, '-', 'track.newGroup', 'track.ungroup'];
+    return ['track.newGroup', 'track.ungroup', '-', ...listed];
   },
 };
 
 /** The Track menu, also the track list's right-click menu (MENUS.md). */
 export const TRACK_ITEMS = [
   'track.rename',
+  'track.editTags',
+  'track.swapTags',
   'track.setArt',
   'track.clearArt',
   'track.gain',
@@ -507,6 +526,8 @@ export const TRACK_ITEMS = [
 
 /** Right-click on a group header: the group itself, then the selection (its tracks) as usual. */
 export const GROUP_CONTEXT_ITEMS = [
+  'group.selectTracks',
+  '-',
   'group.edit',
   'group.setArt',
   'group.clearArt',
@@ -514,6 +535,8 @@ export const GROUP_CONTEXT_ITEMS = [
   'view.collapseAll',
   'view.expandAll',
   '-',
+  'track.editTags',
+  'track.swapTags',
   'track.gain',
   'track.resetGain',
   MOVE_TO_GROUP,
@@ -528,6 +551,9 @@ const ART_MODES = {
   label: 'Art Pane',
   items: ['view.artMode.art', 'view.artMode.lyrics', 'view.artMode.over', '-', 'view.dimArt'],
 };
+
+/** What sits before the title in the transport. View ▸ Now Playing Label ▸, and right-clicking that text. */
+export const NOW_PLAYING_ITEMS = ['view.nowPlaying.artist', 'view.nowPlaying.album', 'view.nowPlaying.both'];
 
 /** Right-click on the art pane: art for the playing track, and the pane itself. */
 export const ART_CONTEXT_ITEMS = [
@@ -594,6 +620,7 @@ export const MENUS = [
       ART_MODES,
       'view.showArtPane',
       'view.resetArtPane',
+      { label: 'Now Playing Label', items: NOW_PLAYING_ITEMS },
       '-',
       'view.collapseAll',
       'view.expandAll',

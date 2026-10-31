@@ -79,6 +79,7 @@ per playlist.
 | Art Pane ▸ Dim Art Behind Lyrics (on/off, default on) | | 10 |
 | Show Art Pane (toggle) | | 6 |
 | Reset Art Pane Size (also: double-click the divider) | | 6 |
+| Now Playing Label ▸ **Artist** / **Album** / **Artist and Album** (also: right-click the label in the transport; default Album) | | Curation |
 | — | | |
 | Collapse All Groups | | 5 |
 | Expand All Groups | | 5 |
@@ -136,6 +137,8 @@ Acts on the selected track(s). **The track list's right-click menu shows the sam
 | Item | Shortcut | Phase |
 |---|---|---|
 | Rename… (in place, in the row) | F2 | 7 |
+| Edit Tags… (artist, album, album artist; playlist-side; one track or many) | | Curation |
+| Swap Artist and Album (each selected track's own two values) | | Curation |
 | Set Custom Art… (applies to every selected track) | | 6 (pulled forward from 7) |
 | Clear Custom Art | | 6 (pulled forward from 7) |
 | Adjust Gain (dB)… (capped at +12dB — PLAN.md §10) | | 7 |
@@ -143,7 +146,7 @@ Acts on the selected track(s). **The track list's right-click menu shows the sam
 | — | | |
 | Link Selected (joins touched chains; moves tracks together) | Ctrl+L | 8 |
 | Unlink (the selected tracks leave their chains) | Ctrl+Shift+L | 8 |
-| Move to Group ▸ (every group, New Group…, By Tags (Automatic); pins `groupId`. With grouping off, just New Group…, which turns on Custom Groups Only) | | 7 |
+| Move to Group ▸ (New Group…, By Tags (Automatic), then every group; pins `groupId`. With grouping off, just New Group…, which turns on Custom Groups Only) | | 7 |
 | — | | |
 | Fetch Lyrics (one track) | | 10 |
 | Edit Lyrics… (saved in the playlist) | | 10 |
@@ -204,11 +207,14 @@ tracks, so the group items act on that group and the rest on its tracks.
 
 | Item | Phase |
 |---|---|
+| Select All Tracks in Group (the tracks, not the group: the header stays unlit; opens a collapsed group) | Curation |
+| — | |
 | Edit Group… | 7 |
 | Set Group Art… / Clear Group Art | 7 |
 | — | |
 | Collapse All Groups / Expand All Groups | 5 |
 | — | |
+| Edit Tags… / Swap Artist and Album | Curation |
 | Adjust Gain… / Reset Gain / Move to Group ▸ | 7 |
 | — | |
 | Cut / Copy / Remove from Playlist | 5 |

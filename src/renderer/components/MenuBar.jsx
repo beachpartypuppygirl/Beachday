@@ -1,8 +1,13 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { MENUS, getContext, resolveItem } from '../menus/commands.js';
 import { player } from '../audio/engine.js';
 import * as store from '../store/playlists.js';
 import * as ui from '../store/ui.js';
+
+// Submenus stay this far inside the window, and match .menu--nested's offsets.
+const WINDOW_MARGIN_PX = 8;
+const NESTED_TOP_PX = -5;
+const NESTED_GAP_PX = 2;
 
 /**
  * The title bar's menus, drawn by hand because the window is frameless
@@ -87,6 +92,23 @@ export function MenuList({ items, ctx, onRun, autoFocus = false, nested = false 
   const listRef = useRef(null);
   const [submenuId, setSubmenuId] = useState(null);
   const resolved = items.map((item) => resolveItem(item, ctx));
+
+  // A submenu opens beside its parent row, then moves to stay in the window:
+  // up from a row near the bottom (or its end is out of reach, scrolling or
+  // not), and to the left near the right edge. Too tall to fit, it scrolls.
+  useLayoutEffect(() => {
+    if (!nested) return;
+    const list = listRef.current;
+    const parent = list.parentElement.getBoundingClientRect();
+    const { width, height } = list.getBoundingClientRect();
+    const lowest = window.innerHeight - WINDOW_MARGIN_PX - height;
+    const top = Math.max(WINDOW_MARGIN_PX, Math.min(parent.top + NESTED_TOP_PX, lowest));
+    list.style.top = `${top - parent.top}px`;
+    if (parent.right + NESTED_GAP_PX + width > window.innerWidth - WINDOW_MARGIN_PX) {
+      list.style.left = 'auto';
+      list.style.right = `calc(100% + ${NESTED_GAP_PX}px)`;
+    }
+  }, [nested, resolved.length]);
 
   useEffect(() => {
     if (autoFocus) listRef.current?.querySelector('[role="menuitem"]:not([aria-disabled="true"])')?.focus();

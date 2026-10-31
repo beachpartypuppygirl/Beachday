@@ -7,6 +7,7 @@ import * as actions from '../store/actions.js';
 import { formatTime } from '../format.js';
 import { GROUP_CONTEXT_ITEMS, TRACK_CONTEXT_ITEMS } from '../menus/commands.js';
 import { artRefUrl } from '../store/art.js';
+import { trackTag } from '../store/tags.js';
 import ContextMenu from './ContextMenu.jsx';
 import TabStrip from './TabStrip.jsx';
 import ArtImage from './ArtImage.jsx';
@@ -513,7 +514,7 @@ function LoadedPlaylist({ playlist }) {
                     style={described ? { transform: style.transform } : style}
                     measureRef={described ? virtualizer.measureElement : undefined}
                     index={item.index}
-                    selected={row.group.trackIds.every((id) => selection.has(id))}
+                    selected={selection !== playlist.view.tracksOnly && row.group.trackIds.every((id) => selection.has(id))}
                     playing={Boolean(playingTrackId) && row.group.trackIds.includes(playingTrackId)}
                     onPointerDown={(event) => onGroupPointerDown(event, row.group)}
                     onDoubleClick={() => store.play(playlist.id, row.group.trackIds[0])}
@@ -569,7 +570,7 @@ function LoadedPlaylist({ playlist }) {
                     </span>
                   )}
                   {(!grouped || isMissing) && (
-                    <span className="track__artist">{isMissing ? 'missing' : track.tags.artist}</span>
+                    <span className="track__artist">{isMissing ? 'missing' : trackTag(track, 'artist')}</span>
                   )}
                   <span className="track__duration">
                     {track.tags.duration != null ? formatTime(track.tags.duration) : ''}

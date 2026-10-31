@@ -2,9 +2,18 @@ import { useRef, useState } from 'react';
 import { player } from '../audio/engine.js';
 import { usePlayer, usePlaybackPosition } from '../audio/usePlayer.js';
 import { formatTime } from '../format.js';
-import { runCommand } from '../menus/commands.js';
+import { NOW_PLAYING_ITEMS, runCommand } from '../menus/commands.js';
+import * as ui from '../store/ui.js';
+import ContextMenu from './ContextMenu.jsx';
 
 const SEEK_STEP_S = 5;
+
+/** What goes before the title. A track without the chosen tag shows the other, if it has it. */
+function nowPlayingNames({ artist, album }, label) {
+  if (label === 'both') return [artist, album].filter(Boolean);
+  const name = label === 'artist' ? artist || album : album || artist;
+  return name ? [name] : [];
+}
 
 /**
  * The bottom bar, laid out after the reference foobar2000 skin: now-playing
@@ -15,19 +24,29 @@ const SEEK_STEP_S = 5;
  */
 export default function Transport() {
   const { current: track, status, duration, volume, muted, error, order, repeat } = usePlayer();
+  const { nowPlayingLabel } = ui.useUi();
+  const [labelMenu, setLabelMenu] = useState(null);
   const isPlaying = status === 'playing';
+  const names = track ? nowPlayingNames(track, nowPlayingLabel) : [];
 
   return (
     <footer className="transport">
       <div className="transport__row">
-        <div className="transport__now" title={track ? [track.album, track.title].filter(Boolean).join(' — ') : undefined}>
+        <div
+          className="transport__now"
+          title={track ? [...names, track.title].join(' — ') : undefined}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            setLabelMenu({ x: event.clientX, y: event.clientY });
+          }}
+        >
           {error ? (
             <span className="transport__error">{error.message}</span>
           ) : track ? (
             <>
-              {(track.album ?? track.artist) && (
-                <span className="transport__album">{track.album ?? track.artist}</span>
-              )}
+              {names.map((name, i) => (
+                <span key={i} className="transport__album">{name}</span>
+              ))}
               <span className="transport__title">{track.title}</span>
             </>
           ) : (
@@ -76,6 +95,7 @@ export default function Transport() {
       </div>
 
       <SeekBar duration={duration} disabled={!track || status === 'empty'} />
+      {labelMenu && <ContextMenu at={labelMenu} items={NOW_PLAYING_ITEMS} onClose={() => setLabelMenu(null)} />}
     </footer>
   );
 }

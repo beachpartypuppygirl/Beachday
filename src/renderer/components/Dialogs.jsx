@@ -10,6 +10,7 @@ import { GAIN_MAX_DB, GAIN_MIN_DB, clampGain, formatGain, seedGainDb, trackGainD
 import { PRESETS, SUB_LINES, TOKENS, applyGroupEdits, buildLayout } from '../store/grouping.js';
 import { DEFAULT_PALETTE, PALETTE_PRESETS, deriveTheme, normalizePalette, parseHex, samePalette } from '../store/theme.js';
 import { fetchedLyrics, lyricsText } from '../store/lyrics.js';
+import { TAG_FIELDS, tagOverride, trackTag } from '../store/tags.js';
 import ArtImage from './ArtImage.jsx';
 import { GroupHeader } from './TrackList.jsx';
 
@@ -26,6 +27,7 @@ export default function Dialogs() {
   if (dialog === 'playlistProperties') return <PlaylistPropertiesDialog />;
   if (dialog === 'colors') return <ColorsDialog />;
   if (dialog === 'gain') return <GainDialog />;
+  if (dialog === 'tags') return <TagsDialog />;
   if (dialog === 'lyrics') return <LyricsDialog />;
   if (dialog === 'sharing') return <SharingDialog />;
   if (dialog === 'grouping') return <GroupingDialog />;
@@ -258,6 +260,9 @@ function PropertiesDialog() {
   const group = playlist.doc.grouping && track.groupId ? store.layoutOf(playlist).groupOf.get(track.id) : null;
   const playlistFields = [
     ['Name', track.overrides.title],
+    ['Artist', tagOverride(track, 'artist')],
+    ['Album', tagOverride(track, 'album')],
+    ['Album artist', tagOverride(track, 'albumArtist')],
     ['Gain', `${formatGain(gain)} (${gainSource})`],
     ['Custom art', track.overrides.art ? 'Yes' : null],
     ['Lyrics', store.trackView(track, playlist.resolution).customLyrics ? 'Saved in this playlist' : null],
@@ -591,6 +596,92 @@ function GainDialog() {
       {mixed && <p className="modal__text">These tracks have different gains now. Apply sets them all to this.</p>}
       <p className="modal__text modal__text--muted">
         {seedNote} {previewId ? 'You’re hearing the change on the playing track.' : ''}
+      </p>
+    </Modal>
+  );
+}
+
+// --- Tags (Track ▸ Edit Tags…) -----------------------------------------------
+
+const TAG_LABELS = { artist: 'Artist', album: 'Album', albumArtist: 'Album artist' };
+
+function TagsDialog() {
+  const { dialogArgs } = ui.useUi();
+  const state = useSyncExternalStore(store.subscribe, store.getState);
+  const playlist = state.playlists[dialogArgs.playlistId];
+  const ids = new Set(dialogArgs.ids);
+  const tracks = (playlist?.doc.tracks ?? []).filter((track) => ids.has(track.id));
+  // What each field starts from: the value the tracks share, or null if they differ.
+  const [shared] = useState(() =>
+    Object.fromEntries(
+      TAG_FIELDS.map((field) => {
+        const values = new Set(tracks.map((track) => trackTag(track, field)));
+        return [field, values.size === 1 ? [...values][0] : null];
+      })
+    )
+  );
+  const [draft, setDraft] = useState(() => Object.fromEntries(TAG_FIELDS.map((field) => [field, shared[field] ?? ''])));
+
+  const [single] = tracks;
+  const placeholder = (field) => {
+    if (shared[field] === null) return 'Multiple values, left as they are';
+    if (tracks.length === 1 && single.tags[field]) return single.tags[field];
+    return field === 'albumArtist' ? 'Same as Artist' : '';
+  };
+
+  // Only what was changed applies: a field left alone keeps each track's own value.
+  const apply = () => {
+    const patch = {};
+    for (const field of TAG_FIELDS) {
+      const value = draft[field].trim();
+      if (value !== (shared[field] ?? '')) patch[field] = value || null;
+    }
+    store.setTrackTags(playlist.id, dialogArgs.ids, patch);
+    ui.closeDialog();
+  };
+  const reset = () => {
+    store.setTrackTags(playlist.id, dialogArgs.ids, Object.fromEntries(TAG_FIELDS.map((field) => [field, null])));
+    ui.closeDialog();
+  };
+
+  return (
+    <Modal
+      title={tracks.length === 1 ? `Tags: ${single.overrides.title || single.tags.title}` : `Tags for ${tracks.length} tracks`}
+      footer={
+        <>
+          {tracks.some((track) => TAG_FIELDS.some((field) => tagOverride(track, field) !== null)) && (
+            <button className="button button--quiet" type="button" onClick={reset}>
+              Reset to File Tags
+            </button>
+          )}
+          <span className="modal__spacer" />
+          <button className="button button--quiet" type="button" onClick={ui.closeDialog}>
+            Cancel
+          </button>
+          <button className="button" type="button" onClick={apply}>
+            Apply
+          </button>
+        </>
+      }
+    >
+      <div className="form">
+        {TAG_FIELDS.map((field, i) => (
+          <label key={field} className="form__label">
+            {TAG_LABELS[field]}
+            <input
+              className="field"
+              data-autofocus={i === 0 ? true : undefined}
+              value={draft[field]}
+              placeholder={placeholder(field)}
+              spellCheck={false}
+              onChange={(e) => setDraft({ ...draft, [field]: e.target.value })}
+              onKeyDown={(e) => e.key === 'Enter' && apply()}
+            />
+          </label>
+        ))}
+      </div>
+      <p className="modal__text modal__text--muted form__note">
+        Saved inside this playlist, so they travel with it. Your music files are never changed. Clear a field to go back to the file’s own tag.
       </p>
     </Modal>
   );

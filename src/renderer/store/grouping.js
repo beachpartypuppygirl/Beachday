@@ -21,6 +21,7 @@
  */
 
 import { artRefUrl, groupArtRef, symbolSeed, trackArtUrl } from './art.js';
+import { trackTag } from './tags.js';
 
 export const PRESETS = {
   album: {
@@ -58,11 +59,12 @@ function formatDuration(seconds) {
 /** Per-track token values. */
 function trackFields(track) {
   const { tags } = track;
+  const artist = trackTag(track, 'artist');
   return {
     title: track.overrides.title || tags.title || '',
-    artist: tags.artist || '',
-    albumartist: tags.albumArtist || tags.artist || '',
-    album: tags.album || '',
+    artist,
+    albumartist: trackTag(track, 'albumArtist') || artist,
+    album: trackTag(track, 'album'),
     year: tags.year ? String(tags.year) : '',
     genre: tags.genre || '',
     codec: tags.codec ? tags.codec.toLowerCase() : '',
