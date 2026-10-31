@@ -83,8 +83,4 @@ You'll need [Node.js](https://nodejs.org) (Beachday is developed on version 24).
 npm install
 npm run dev        # run the app, with hot reload
 npm run pack:all   # build the Windows zip and Linux AppImage into release/
-npm test           # unit and end-to-end tests
 ```
-
-The tests use a few specific audio files that aren't in this repository, so `npm test` won't pass
-on a fresh copy. `tests/fixtures.mjs` lists them.
