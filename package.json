@@ -6,7 +6,7 @@
   "desktopName": "beachday.desktop",
   "type": "module",
   "main": "src/main/main.mjs",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "private": true,
   "scripts": {
     "dev": "concurrently -k -n vite,electron -c cyan,magenta \"npm:dev:renderer\" \"npm:dev:electron\"",

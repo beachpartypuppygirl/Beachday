@@ -73,6 +73,7 @@ To open a playlist you've been sent, use **File ▸ Open Playlist…** in Beachd
 | **Runs on** | Windows and Linux (64-bit) |
 | **Built with** | Electron, React and Vite, in plain JavaScript |
 | **Lyrics** | [LRCLIB](https://lrclib.net), a free community lyrics service |
+| **License** | [MIT](LICENSE) |
 
 ### Running from source
 
